@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \":*)",
+      "Bash(python3 -c \"import nflreadr; print\\(''nflreadr available''\\)\")",
+      "Bash(python3 -c \"import nfl_data_py; print\\(''nfl_data_py available''\\)\")",
+      "Bash(pip3 list)",
+      "Bash(python3 -c \"import pandas; print\\(''pandas'', pandas.__version__\\)\")",
+      "Bash(pip --version)",
+      "Bash(pip3 --version)",
+      "Bash(pip3 install pandas numpy matplotlib seaborn scikit-learn)",
+      "Bash(pip3 install pandas numpy matplotlib seaborn scikit-learn --break-system-packages)",
+      "Bash(pip3 install nfl_data_py --break-system-packages)",
+      "Bash(pip3 install setuptools --break-system-packages)",
+      "Bash(python3 analyze_combine.py)",
+      "Bash(python3 merge_draft_status.py)",
+      "Bash(python3 add_2025_draft.py)",
+      "Bash(python3 merge_pro_day.py)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(streamlit run app.py)"
+    ]
+  }
+}
