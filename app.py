@@ -324,7 +324,7 @@ MEASUREMENTS = {
     "3-Cone Drill (s)":     ("combine_three_cone_drill",    "pro_day_three_cone_drill"),
     "20-Yd Shuttle (s)":    ("combine_twenty_yard_shuttle", "pro_day_twenty_yard_shuttle"),
     "Wingspan (in) ★Pro Day only": (None,                  "pro_day_wingspan"),
-    "Scout Grade ★":        ("draft_grade",                 None),
+    "NGS Scout Grade ★":        ("draft_grade",                 None),
 }
 
 # ── データ読み込み（キャッシュ）────────────────────────────────────────────────
@@ -1345,16 +1345,31 @@ with tab_hi:
         # 2026 prospectも追加（df_2026_baseから）
         if not df_2026_base.empty:
             _hist_ext = pd.concat([_hist_ext, df_2026_base[df_2026_base["_x"].notna()]], ignore_index=True)
-        hl_in_hist = _hist_ext[_hist_ext["player"].isin(highlighted_players)].copy()
-        for _, row in hl_in_hist.iterrows():
+        hl_in_hist = _hist_ext[_hist_ext["player"].isin(highlighted_players)].sort_values("_x").reset_index(drop=True)
+        # y positions staggered to avoid label overlap (cycles through 5 levels)
+        _y_levels = [0.97, 0.89, 0.81, 0.73, 0.65]
+        for i, (_, row) in enumerate(hl_in_hist.iterrows()):
             line_color = PREDRAFT_BORDER if row["drafted_label"] == "Unknown" else POS_COLORS.get(row.get("pos_group", ""), "#FF6F00")
             fig_hi.add_vline(
                 x=row["_x"],
                 line=dict(color=line_color, width=2, dash="dash"),
-                annotation_text=f"{row['player']} ({row['_x']:.2f})",
-                annotation_position="top",
-                annotation_font_size=10,
-                annotation_font_color="#C9D1D9",
+            )
+            fig_hi.add_annotation(
+                x=row["_x"],
+                y=_y_levels[i % len(_y_levels)],
+                yref="paper",
+                text=f"{row['player']} ({row['_x']:.2f})",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=0.8,
+                arrowcolor=line_color,
+                font=dict(size=10, color="#C9D1D9", family=THEME["font"]),
+                bgcolor=THEME["card_bg"],
+                bordercolor=line_color,
+                borderwidth=1,
+                borderpad=3,
+                opacity=0.92,
+                xanchor="left",
             )
 
     fig_hi.update_layout(
@@ -1407,7 +1422,7 @@ with tab_cmp:
     if not cmp_players:
         st.info(T["compare_no_data"])
     else:
-        radar_labels_all = [l for l in MEASUREMENTS.keys() if l != "Scout Grade ★" and "Wingspan" not in l]
+        radar_labels_all = [l for l in MEASUREMENTS.keys() if l != "NGS Scout Grade ★" and "Wingspan" not in l]
 
         fig_radar = go.Figure()
         radar_data_rows = []
@@ -1547,7 +1562,7 @@ with tab_cmp:
                     # 利用可能な測定値列を追加
                     meas_display_cols = []
                     for _lbl, (c_col, p_col) in MEASUREMENTS.items():
-                        if _lbl in ("Scout Grade ★",):
+                        if _lbl in ("NGS Scout Grade ★",):
                             continue
                         col = c_col or p_col
                         if col and col in similar_df.columns and similar_df[col].notna().any():
