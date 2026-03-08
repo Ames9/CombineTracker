@@ -258,6 +258,59 @@ PREDRAFT_BORDER     = "#FF8F00"
 UDFA_SUCCESS_COLOR  = "#00C853"
 UDFA_SUCCESS_BORDER = "#1B5E20"
 
+# ── テーマ定数 ────────────────────────────────────────────────────────────────
+THEME = {
+    "bg":       "#0D1117",
+    "card_bg":  "#161B22",
+    "border":   "#30363D",
+    "grid":     "#21262D",
+    "text":     "#C9D1D9",
+    "text_bright": "#E6EDF3",
+    "muted":    "#6E7681",
+    "label":    "#8B949E",
+    "accent":   "#58A6FF",
+    "font":     "Geist, sans-serif",
+}
+
+DRAFT_ROUND_COLORS = {
+    1: "#E53935", 2: "#FB8C00", 3: "#FDD835", 4: "#43A047",
+    5: "#00ACC1", 6: "#1E88E5", 7: "#8E24AA", "UDFA": "#6E7681",
+}
+
+# 低いほうが良い測定項目（タイム系）
+LOWER_IS_BETTER = {
+    "40-Yard Dash (s)", "10-Yard Split (s)",
+    "3-Cone Drill (s)", "20-Yd Shuttle (s)",
+}
+
+MIN_SAMPLES_ELLIPSE = 10
+MIN_SAMPLES_STATS = 5
+LABEL_WARN_THRESHOLD = 80
+HIST_BINS = 30
+KDE_BANDWIDTH = 0.5
+MIN_KDE_SAMPLES = 5
+MIN_RAS_MEASUREMENTS = 4
+
+
+def make_plot_layout(**overrides):
+    """散布図・ヒストグラム共通のPlotlyレイアウト辞書を生成"""
+    base = dict(
+        plot_bgcolor=THEME["card_bg"], paper_bgcolor=THEME["bg"],
+        font=dict(color=THEME["text"], family=THEME["font"]),
+        hoverlabel=dict(bgcolor="#1C2128", bordercolor=THEME["border"],
+                        font=dict(color=THEME["text_bright"], size=12, family=THEME["font"])),
+        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0,
+                    bgcolor="rgba(22,27,34,0.85)", bordercolor=THEME["border"], borderwidth=1,
+                    font=dict(size=11, color=THEME["text"], family=THEME["font"])),
+        xaxis=dict(gridcolor=THEME["grid"], linecolor=THEME["border"], zerolinecolor=THEME["border"],
+                   tickfont=dict(color=THEME["muted"], size=11), title_font=dict(color=THEME["label"])),
+        yaxis=dict(gridcolor=THEME["grid"], linecolor=THEME["border"], zerolinecolor=THEME["border"],
+                   tickfont=dict(color=THEME["muted"], size=11), title_font=dict(color=THEME["label"])),
+        margin=dict(t=20, b=160, l=50, r=20),
+    )
+    base.update(overrides)
+    return base
+
 # ── 測定項目定義 ───────────────────────────────────────────────────────────────
 MEASUREMENTS = {
     "Height (in)":          ("combine_height",              "pro_day_height"),
@@ -272,6 +325,7 @@ MEASUREMENTS = {
     "3-Cone Drill (s)":     ("combine_three_cone_drill",    "pro_day_three_cone_drill"),
     "20-Yd Shuttle (s)":    ("combine_twenty_yard_shuttle", "pro_day_twenty_yard_shuttle"),
     "Wingspan (in) ★Pro Day only": (None,                  "pro_day_wingspan"),
+    "Scout Grade ★":        ("draft_grade",                 None),
 }
 
 # ── データ読み込み（キャッシュ）────────────────────────────────────────────────
@@ -316,6 +370,20 @@ def apply_udfa_label(df: pd.DataFrame, udfa_threshold: int) -> pd.DataFrame:
         df.loc[success_mask, "drafted_label"] = "Undrafted NFL"
     return df
 
+@st.cache_data
+def build_player_search_options(df):
+    """選手検索ラベルリストをキャッシュ生成"""
+    names_df = df[["player", "year", "position"]].drop_duplicates("player").copy()
+    names_df["_label"] = (
+        names_df["player"] + "  ("
+        + names_df["position"].fillna("?") + ", "
+        + names_df["year"].astype(str) + ")"
+    )
+    label_to_player = dict(zip(names_df["_label"], names_df["player"]))
+    sorted_labels = sorted(names_df["_label"].tolist())
+    return sorted_labels, label_to_player
+
+
 def resolve_measurement(df, label: str, use_proday: bool) -> pd.Series:
     combine_col, proday_col = MEASUREMENTS[label]
     if combine_col is None:
@@ -324,6 +392,104 @@ def resolve_measurement(df, label: str, use_proday: bool) -> pd.Series:
     if use_proday and proday_col:
         s = s.combine_first(df[proday_col])
     return s
+
+
+@st.cache_data
+def compute_all_position_percentiles() -> dict:
+    """全ポジション・全測定項目のドラフト指名選手分布をキャッシュ生成"""
+    df = load_data()
+    drafted = df[df["_drafted_base"] == "Drafted"]
+    result = {}
+    for pos in POS_GROUP_ORDER:
+        sub = drafted[drafted["pos_group"] == pos]
+        pos_dict = {}
+        for label, (combine_col, proday_col) in MEASUREMENTS.items():
+            col = combine_col or proday_col
+            if col and col in sub.columns:
+                vals = sub[col].dropna().values
+                if len(vals) >= 10:
+                    pos_dict[label] = vals
+        result[pos] = pos_dict
+    return result
+
+
+def compute_position_percentiles(df_drafted, pos_group: str) -> dict:
+    """ポジション別参照分布を返す（キャッシュ済みデータを利用）"""
+    return _ALL_POS_PERCENTILES.get(pos_group, {})
+
+
+def calc_percentile(value, reference_values, label: str) -> float | None:
+    """value が reference_values 中で何パーセンタイルかを返す。低い方が良いなら反転"""
+    from scipy.stats import percentileofscore as _pos
+    if len(reference_values) < 5:
+        return None
+    pct = _pos(reference_values, value, kind="mean")
+    if label in LOWER_IS_BETTER:
+        pct = 100.0 - pct
+    return round(pct, 1)
+
+
+def compute_ras(player_row: pd.Series, reference_dict: dict) -> float | None:
+    """RAS風スコアを0-10で返す。参照分布に対するパーセンタイル平均"""
+    scores = []
+    for label, ref_vals in reference_dict.items():
+        combine_col, proday_col = MEASUREMENTS[label]
+        val = None
+        if combine_col and combine_col in player_row.index and pd.notna(player_row.get(combine_col)):
+            val = player_row[combine_col]
+        elif proday_col and proday_col in player_row.index and pd.notna(player_row.get(proday_col)):
+            val = player_row[proday_col]
+        if val is not None:
+            pct = calc_percentile(val, ref_vals, label)
+            if pct is not None:
+                scores.append(pct)
+    if len(scores) < MIN_RAS_MEASUREMENTS:
+        return None
+    return round(np.mean(scores) / 10.0, 2)
+
+
+def find_similar_players(player_row: pd.Series, df_hist: pd.DataFrame, pos_group: str, n: int = 8) -> pd.DataFrame:
+    """z-scoreベースのユークリッド距離で類似選手をtop-n返す"""
+    sub = df_hist[df_hist["pos_group"] == pos_group].copy()
+    meas_cols = []
+    for label, (combine_col, proday_col) in MEASUREMENTS.items():
+        col = combine_col or proday_col
+        if col and col in sub.columns:
+            meas_cols.append((label, col))
+    if not meas_cols:
+        return pd.DataFrame()
+
+    # 使用可能な列のみ（対象選手に値がある列）
+    usable = []
+    for label, col in meas_cols:
+        pval = player_row.get(col)
+        if pd.notna(pval) and sub[col].notna().sum() >= 10:
+            usable.append((label, col))
+    if len(usable) < 3:
+        return pd.DataFrame()
+
+    cols = [c for _, c in usable]
+    labels = [l for l, _ in usable]
+    means = sub[cols].mean()
+    stds  = sub[cols].std().replace(0, 1)
+    player_z = np.array([(player_row.get(c, np.nan) - means[c]) / stds[c] for c in cols])
+
+    dists = []
+    for idx, row in sub.iterrows():
+        row_z = np.array([(row[c] - means[c]) / stds[c] for c in cols])
+        mask = ~(np.isnan(player_z) | np.isnan(row_z))
+        if mask.sum() < 3:
+            continue
+        dist = np.sqrt(np.mean((player_z[mask] - row_z[mask]) ** 2))
+        dists.append((idx, dist))
+
+    if not dists:
+        return pd.DataFrame()
+    dists.sort(key=lambda x: x[1])
+    top_idx = [i for i, _ in dists[1:n+1]]  # 自分自身を除く
+    result = sub.loc[top_idx].copy()
+    result["_similarity"] = [1 / (1 + d) * 100 for _, d in dists[1:n+1]]
+    return result
 
 def measurement_source(df, label: str, use_proday: bool) -> pd.Series:
     combine_col, proday_col = MEASUREMENTS[label]
@@ -392,6 +558,24 @@ _TR = {
         "predraft_metric":  "⭐ 2026 Pre-Draft",
         "source_metric":    "Data source (X)",
         "density":          "Density",
+        "tab_compare":      "🔍 Player Comparison",
+        "compare_select":   "Select up to 4 players to compare",
+        "compare_pos_warn": "Select players from the same position group for best results.",
+        "compare_radar":    "Percentile Radar Chart",
+        "compare_table":    "Measurement Details",
+        "compare_no_data":  "Select at least 1 player to compare.",
+        "compare_pct_note": "Percentiles vs. drafted players of same position group (all years). Higher = better (speed metrics inverted).",
+        "ras_label":        "RAS Score",
+        "ras_help":         "Relative Athletic Score: avg percentile across available measurements (0–10). vs. drafted players of same position.",
+        "similar_header":   "🔗 Similar Players",
+        "similar_select":   "Find players similar to…",
+        "similar_help":     "Finds historical players with the most similar combine profile (z-score distance).",
+        "similar_n":        "Number of results",
+        "similar_table":    "Most Similar Historical Players",
+        "color_mode":       "Color by",
+        "color_position":   "Position group",
+        "color_round":      "Draft round",
+        "download_csv":     "⬇️ Download filtered data (CSV)",
         "footer_line1":     (
             "Data: NFL Combine (official) + Pro Day measurements  |  "
             "Draft data: nflverse (2006–2024) + manual (2025)  |  "
@@ -459,6 +643,24 @@ _TR = {
         "predraft_metric":  "⭐ 2026 プレドラフト",
         "source_metric":    "データソース (X)",
         "density":          "密度",
+        "tab_compare":      "🔍 選手比較",
+        "compare_select":   "最大4選手を選択",
+        "compare_pos_warn": "同じポジショングループの選手を比較すると最も意味があります。",
+        "compare_radar":    "パーセンタイル レーダーチャート",
+        "compare_table":    "計測値詳細",
+        "compare_no_data":  "比較する選手を1人以上選択してください。",
+        "compare_pct_note": "同ポジション・全年度のドラフト指名選手との比較。高いほど良い（タイム系は反転）。",
+        "ras_label":        "RASスコア",
+        "ras_help":         "総合運動能力スコア（0〜10）：全計測のパーセンタイル平均。同ポジションのドラフト指名選手が基準。",
+        "similar_header":   "🔗 類似選手",
+        "similar_select":   "類似選手を探す基準となる選手",
+        "similar_help":     "z-score距離で過去の最も近い運動能力プロフィールの選手を検索。",
+        "similar_n":        "表示件数",
+        "similar_table":    "最も近い過去の選手",
+        "color_mode":       "カラー",
+        "color_position":   "ポジション別",
+        "color_round":      "ドラフトラウンド別",
+        "download_csv":     "⬇️ フィルタ済みデータ (CSV)",
         "footer_line1":     (
             "データ: NFL Combine（公式）+ Pro-day計測  |  "
             "ドラフトデータ: nflverse (2006–2024) + 手動入力 (2025)  |  "
@@ -477,6 +679,7 @@ _TR = {
 }
 
 df_all = load_data()
+_ALL_POS_PERCENTILES = compute_all_position_percentiles()
 
 # ════════════════════════════════════════════════════════════════════════════
 # サイドバー
@@ -535,16 +738,10 @@ with st.sidebar:
 
     # 選手検索 & ラベル
     st.subheader(T["search_header"])
-    all_names_df = df_all[["player", "year", "position", "college"]].drop_duplicates("player").copy()
-    all_names_df["_label"] = (
-        all_names_df["player"] + "  ("
-        + all_names_df["position"].fillna("?") + ", "
-        + all_names_df["year"].astype(str) + ")"
-    )
-    label_to_player = dict(zip(all_names_df["_label"], all_names_df["player"]))
+    _search_options, label_to_player = build_player_search_options(df_all)
     highlighted_labels = st.multiselect(
         T["search_label"],
-        options=sorted(all_names_df["_label"].tolist()),
+        options=_search_options,
         default=[],
         placeholder=T["search_ph"],
         help=T["search_help"],
@@ -582,6 +779,10 @@ with st.sidebar:
     # 表示設定
     st.markdown("---")
     st.subheader(T["display_header"])
+    color_mode   = st.radio(T["color_mode"],
+                            [T["color_position"], T["color_round"]],
+                            horizontal=True, index=0)
+    use_round_color = color_mode == T["color_round"]
     marker_size  = st.slider(T["marker_size"], 3, 12, 5)
     marker_alpha = st.slider(T["opacity"], 0.1, 1.0, 0.65, 0.05)
     show_ellipse = st.toggle(T["ellipse"], value=False)
@@ -648,12 +849,23 @@ with col_h5:
     proday_n  = (df_base["_x_src"] == "Pro Day").sum()
     st.metric(T["source_metric"], f"C {combine_n:,} / PD {proday_n:,}")
 
+_csv_col, _ = st.columns([1, 4])
+with _csv_col:
+    _csv_export = df_base.drop(columns=[c for c in ["_x", "_x_src", "_drafted_base"] if c in df_base.columns], errors="ignore")
+    st.download_button(
+        T["download_csv"],
+        data=_csv_export.to_csv(index=False).encode("utf-8"),
+        file_name=f"NFL_Combine_{'_'.join(selected_pos)}_{year_range[0]}-{year_range[1]}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
 st.markdown("---")
 
 # ════════════════════════════════════════════════════════════════════════════
 # タブ
 # ════════════════════════════════════════════════════════════════════════════
-tab_sc, tab_hi = st.tabs([T["tab_scatter"], T["tab_histogram"]])
+tab_sc, tab_hi, tab_cmp = st.tabs([T["tab_scatter"], T["tab_histogram"], T["tab_compare"]])
 
 # ────────────────────────────────────────────────────────────────────────────
 # 散布図タブ
@@ -669,7 +881,6 @@ with tab_sc:
     df_2026_plot["_y"]     = resolve_measurement(df_2026_plot, y_label, use_proday)
     df_2026_plot["_y_src"] = measurement_source(df_2026_plot, y_label, use_proday)
 
-    color_map  = {p: POS_COLORS[p] for p in selected_pos}
     symbol_map = {
         "Drafted":       "circle",
         "Undrafted NFL": "triangle-up",
@@ -689,27 +900,60 @@ with tab_sc:
         hover_cols["nfl_rookie_season"] = True
         hover_cols["nfl_last_season"]   = True
 
-    fig = px.scatter(
-        df_plot,
-        x="_x", y="_y",
-        color="pos_group",
-        symbol="drafted_label",
-        color_discrete_map=color_map,
-        symbol_map=symbol_map,
-        hover_data=hover_cols,
-        labels={
-            "_x": x_label, "_y": y_label,
-            "pos_group": "Position", "drafted_label": "Status",
-            "_x_src": "X source", "_y_src": "Y source",
-            "player": "Player", "year": "Year",
-            "college": "College", "draft_round": "Round",
-            "draft_pick": "Pick", "draft_team": "Team",
-            "career_seasons": "NFL Seasons",
-            "nfl_rookie_season": "Rookie Year",
-            "nfl_last_season": "Last Season",
-        },
-        opacity=marker_alpha,
-    )
+    if use_round_color:
+        # ドラフトラウンド別カラーリング
+        def _round_label(row):
+            if pd.isna(row.get("draft_round")):
+                return "UDFA"
+            return f"Rd {int(row['draft_round'])}"
+        df_plot["_color_key"] = df_plot.apply(_round_label, axis=1)
+        _round_color_map = {f"Rd {r}": c for r, c in DRAFT_ROUND_COLORS.items() if isinstance(r, int)}
+        _round_color_map["UDFA"] = DRAFT_ROUND_COLORS["UDFA"]
+        fig = px.scatter(
+            df_plot,
+            x="_x", y="_y",
+            color="_color_key",
+            symbol="drafted_label",
+            color_discrete_map=_round_color_map,
+            symbol_map=symbol_map,
+            hover_data=hover_cols,
+            labels={
+                "_x": x_label, "_y": y_label,
+                "_color_key": "Round", "drafted_label": "Status",
+                "_x_src": "X source", "_y_src": "Y source",
+                "player": "Player", "year": "Year",
+                "college": "College", "draft_round": "Round",
+                "draft_pick": "Pick", "draft_team": "Team",
+                "career_seasons": "NFL Seasons",
+                "nfl_rookie_season": "Rookie Year",
+                "nfl_last_season": "Last Season",
+            },
+            category_orders={"_color_key": [f"Rd {r}" for r in range(1, 8)] + ["UDFA"]},
+            opacity=marker_alpha,
+        )
+    else:
+        color_map = {p: POS_COLORS[p] for p in selected_pos}
+        fig = px.scatter(
+            df_plot,
+            x="_x", y="_y",
+            color="pos_group",
+            symbol="drafted_label",
+            color_discrete_map=color_map,
+            symbol_map=symbol_map,
+            hover_data=hover_cols,
+            labels={
+                "_x": x_label, "_y": y_label,
+                "pos_group": "Position", "drafted_label": "Status",
+                "_x_src": "X source", "_y_src": "Y source",
+                "player": "Player", "year": "Year",
+                "college": "College", "draft_round": "Round",
+                "draft_pick": "Pick", "draft_team": "Team",
+                "career_seasons": "NFL Seasons",
+                "nfl_rookie_season": "Rookie Year",
+                "nfl_last_season": "Last Season",
+            },
+            opacity=marker_alpha,
+        )
     fig.update_traces(marker_size=marker_size)
 
     # 95% 信頼楕円
@@ -746,12 +990,29 @@ with tab_sc:
         src_x = row.get("_x_src", "—")
         src_y = row.get("_y_src", "—") if use_proday else ""
         src_line = f"Source: {src_x} / {src_y}" if use_proday else f"Source: {src_x}"
+        pos = row.get("pos_group", "")
+        ref = compute_position_percentiles(None, pos)
+        x_pct_str, y_pct_str = "", ""
+        combine_x, proday_x = MEASUREMENTS.get(x_label, (None, None))
+        col_x = combine_x or proday_x
+        if col_x and col_x in ref and pd.notna(row.get("_x")):
+            pct = calc_percentile(row["_x"], ref[col_x], x_label)
+            if pct is not None:
+                x_pct_str = f"  ({pct:.0f}th %ile)"
+        combine_y, proday_y = MEASUREMENTS.get(y_label, (None, None))
+        col_y = combine_y or proday_y
+        if col_y and col_y in ref and pd.notna(row.get("_y")):
+            pct = calc_percentile(row["_y"], ref[col_y], y_label)
+            if pct is not None:
+                y_pct_str = f"  ({pct:.0f}th %ile)"
+        ras = compute_ras(row, ref)
+        ras_str = f"<br>RAS: <b>{ras:.2f}</b>/10" if ras is not None else ""
         return (
             f"<b>⭐ {row['player']}</b>  [2026 Pre-Draft]<br>"
             f"{row.get('position', '?')} • {row.get('college', '')}<br>"
-            f"{x_label}: {x_val}<br>"
-            f"{y_label}: {y_val}<br>"
-            f"{src_line}"
+            f"{x_label}: {x_val}{x_pct_str}<br>"
+            f"{y_label}: {y_val}{y_pct_str}<br>"
+            f"{src_line}{ras_str}"
         )
 
     if show_2026 and not df_2026_plot.empty:
@@ -915,27 +1176,12 @@ with tab_sc:
                 showlegend=False, hoverinfo="skip", name="labels_all",
             ))
 
-    _plot_layout = dict(
-        plot_bgcolor="#161B22", paper_bgcolor="#0D1117",
-        font=dict(color="#C9D1D9", family="Geist, sans-serif"),
-        hoverlabel=dict(bgcolor="#1C2128", bordercolor="#30363D",
-                        font=dict(color="#E6EDF3", size=12, family="Geist, sans-serif")),
-        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0,
-                    bgcolor="rgba(22,27,34,0.85)", bordercolor="#30363D", borderwidth=1,
-                    font=dict(size=11, color="#C9D1D9", family="Geist, sans-serif")),
-        xaxis=dict(gridcolor="#21262D", linecolor="#30363D", zerolinecolor="#30363D",
-                   tickfont=dict(color="#6E7681", size=11), title_font=dict(color="#8B949E")),
-        yaxis=dict(gridcolor="#21262D", linecolor="#30363D", zerolinecolor="#30363D",
-                   tickfont=dict(color="#6E7681", size=11), title_font=dict(color="#8B949E")),
-        margin=dict(t=20, b=160, l=50, r=20),
-    )
-
     fig.update_layout(
         xaxis_title=x_label, yaxis_title=y_label, height=660,
-        **_plot_layout,
+        **make_plot_layout(),
     )
-    fig.update_xaxes(showgrid=True, gridcolor="#21262D")
-    fig.update_yaxes(showgrid=True, gridcolor="#21262D")
+    fig.update_xaxes(showgrid=True, gridcolor=THEME["grid"])
+    fig.update_yaxes(showgrid=True, gridcolor=THEME["grid"])
 
     # ダウンロードボタン（グラフ上部・右寄せ、遅延生成）
     _pos_str = "+".join(selected_pos)
@@ -1053,8 +1299,7 @@ with tab_sc:
                 boxmode="group",
                 yaxis_title=x_label, height=480,
                 showlegend=True,
-                **{k: v for k, v in _plot_layout.items() if k != "margin"},
-                margin=dict(t=40, b=60),
+                **make_plot_layout(margin=dict(t=40, b=60)),
             )
             st.plotly_chart(fig_box, use_container_width=True)
         else:
@@ -1138,29 +1383,163 @@ with tab_hi:
         title=dict(
             text=f"{x_label} — Distribution by Position"
                  + (" (Drafted / Undrafted split)" if hist_split else ""),
-            font=dict(size=13, color="#6E7681", family="Geist, sans-serif"),
+            font=dict(size=13, color=THEME["muted"], family=THEME["font"]),
             x=0, xanchor="left",
         ),
         xaxis_title=x_label,
         yaxis_title=T["density"],
         height=520,
-        plot_bgcolor="#161B22", paper_bgcolor="#0D1117",
-        font=dict(color="#C9D1D9", family="Geist, sans-serif"),
-        hoverlabel=dict(bgcolor="#1C2128", bordercolor="#30363D",
-                        font=dict(color="#E6EDF3", size=12, family="Geist, sans-serif")),
-        legend=dict(
-            orientation="h",
-            bgcolor="rgba(22,27,34,0.85)", bordercolor="#30363D", borderwidth=1,
-            font=dict(size=11, color="#C9D1D9", family="Geist, sans-serif"),
-        ),
-        xaxis=dict(gridcolor="#21262D", linecolor="#30363D",
-                   tickfont=dict(color="#6E7681", size=11), title_font=dict(color="#8B949E")),
-        yaxis=dict(gridcolor="#21262D", linecolor="#30363D",
-                   tickfont=dict(color="#6E7681", size=11), title_font=dict(color="#8B949E")),
-        margin=dict(t=60, b=40, l=50, r=20),
+        **make_plot_layout(margin=dict(t=60, b=40, l=50, r=20)),
     )
 
     st.plotly_chart(fig_hi, use_container_width=True)
+
+# ────────────────────────────────────────────────────────────────────────────
+# 選手比較タブ（B1 レーダーチャート + B4 類似選手）
+# ────────────────────────────────────────────────────────────────────────────
+with tab_cmp:
+    _cmp_search_opts, _cmp_label_to_player = build_player_search_options(df_all)
+
+    cmp_col1, cmp_col2 = st.columns([1, 1])
+    with cmp_col1:
+        st.subheader(T["compare_radar"])
+        cmp_selected_labels = st.multiselect(
+            T["compare_select"],
+            options=_cmp_search_opts,
+            default=[],
+            max_selections=4,
+            placeholder="Type a name…",
+        )
+        cmp_players = [_cmp_label_to_player[l] for l in cmp_selected_labels]
+
+    with cmp_col2:
+        st.subheader(T["similar_header"])
+        sim_selected_label = st.selectbox(
+            T["similar_select"],
+            options=[""] + _cmp_search_opts,
+            index=0,
+            help=T["similar_help"],
+        )
+        sim_n = st.slider(T["similar_n"], 5, 15, 8)
+
+    st.markdown("---")
+
+    # ── レーダーチャート ──
+    if not cmp_players:
+        st.info(T["compare_no_data"])
+    else:
+        radar_labels_all = [l for l in MEASUREMENTS.keys() if l != "Scout Grade ★" and "Wingspan" not in l]
+
+        fig_radar = go.Figure()
+        radar_data_rows = []
+
+        for pname in cmp_players:
+            _rows = df_all[df_all["player"] == pname]
+            if _rows.empty:
+                continue
+            prow = _rows.iloc[0]
+            pos  = prow.get("pos_group", "")
+            ref  = compute_position_percentiles(None, pos)
+
+            r_vals, r_labs = [], []
+            for label in radar_labels_all:
+                combine_col, proday_col = MEASUREMENTS[label]
+                col = combine_col or proday_col
+                if col not in ref:
+                    continue
+                val = prow.get(combine_col) if combine_col else None
+                if pd.isna(val) and proday_col:
+                    val = prow.get(proday_col)
+                if val is None or pd.isna(val):
+                    continue
+                pct = calc_percentile(val, ref[col], label)
+                if pct is not None:
+                    r_vals.append(pct)
+                    r_labs.append(label.split(" (")[0])
+
+            if not r_vals:
+                continue
+
+            ras = compute_ras(prow, ref)
+            ras_str = f" | RAS {ras:.2f}" if ras is not None else ""
+            pos_color = POS_COLORS.get(pos, THEME["accent"])
+
+            fig_radar.add_trace(go.Scatterpolar(
+                r=r_vals + [r_vals[0]],
+                theta=r_labs + [r_labs[0]],
+                fill="toself",
+                fillcolor=f"rgba{tuple(int(pos_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)) + (0.15,)}",
+                line=dict(color=pos_color, width=2),
+                name=f"{pname} ({pos}{ras_str})",
+            ))
+            radar_data_rows.append({
+                "Player": pname, "Position": pos, "Year": int(prow.get("year", 0)),
+                "RAS": f"{ras:.2f}/10" if ras is not None else "—",
+                **{l.split(" (")[0]: f"{v:.0f}th" for l, v in zip(r_labs, r_vals)},
+            })
+
+        fig_radar.update_layout(
+            polar=dict(
+                bgcolor=THEME["card_bg"],
+                radialaxis=dict(
+                    visible=True, range=[0, 100],
+                    tickfont=dict(color=THEME["muted"], size=9),
+                    gridcolor=THEME["grid"],
+                    linecolor=THEME["border"],
+                ),
+                angularaxis=dict(
+                    tickfont=dict(color=THEME["text"], size=10, family=THEME["font"]),
+                    gridcolor=THEME["grid"],
+                    linecolor=THEME["border"],
+                ),
+            ),
+            **make_plot_layout(margin=dict(t=40, b=60, l=60, r=60)),
+            height=500,
+        )
+        st.plotly_chart(fig_radar, use_container_width=True)
+        st.caption(T["compare_pct_note"])
+
+        if radar_data_rows:
+            st.subheader(T["compare_table"])
+            st.dataframe(pd.DataFrame(radar_data_rows).set_index("Player"), use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 類似選手ファインダー ──
+    st.subheader(T["similar_table"])
+    if sim_selected_label and sim_selected_label != "":
+        sim_player_name = _cmp_label_to_player.get(sim_selected_label)
+        if sim_player_name:
+            _sim_rows = df_all[df_all["player"] == sim_player_name]
+            if not _sim_rows.empty:
+                _sim_row = _sim_rows.iloc[0]
+                _sim_pos = _sim_row.get("pos_group", "")
+                _df_hist_sim = df_all[
+                    (df_all["_drafted_base"] != "Unknown") &
+                    (df_all["pos_group"] == _sim_pos)
+                ]
+                similar_df = find_similar_players(_sim_row, _df_hist_sim, _sim_pos, n=sim_n)
+                if not similar_df.empty:
+                    display_cols = ["player", "year", "college", "pos_group", "drafted_label",
+                                    "draft_round", "draft_pick", "_similarity"]
+                    if HAS_CAREER:
+                        display_cols += ["career_seasons"]
+                    display_cols = [c for c in display_cols if c in similar_df.columns]
+                    similar_show = similar_df[display_cols].copy()
+                    similar_show.columns = [
+                        {"player": "Player", "year": "Year", "college": "College",
+                         "pos_group": "Pos", "drafted_label": "Status",
+                         "draft_round": "Round", "draft_pick": "Pick",
+                         "_similarity": "Similarity %", "career_seasons": "NFL Seasons"
+                         }.get(c, c) for c in display_cols
+                    ]
+                    similar_show["Similarity %"] = similar_show["Similarity %"].round(1)
+                    st.caption(f"Most similar to **{sim_player_name}** ({_sim_pos}, {int(_sim_row.get('year', 0))})")
+                    st.dataframe(similar_show.reset_index(drop=True), use_container_width=True)
+                else:
+                    st.info("Not enough measurement data to find similar players.")
+    else:
+        st.info(T["compare_no_data"])
 
 # ── フッター ───────────────────────────────────────────────────────────────────
 st.markdown("---")
