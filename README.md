@@ -5,6 +5,7 @@ Built by [Ames](https://x.com/ames_NFL) & Claude Code
 
 An interactive Streamlit app for exploring NFL Combine and Pro Day athletic measurements, with draft outcome overlays, prospect comparisons, and similar-player search.
 
+You can open the app [here](https://ames-combinetracker.streamlit.app/).
 ---
 
 ## English
