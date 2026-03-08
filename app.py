@@ -826,17 +826,6 @@ with col_h5:
     proday_n  = (df_base["_x_src"] == "Pro Day").sum()
     st.metric(T["source_metric"], f"C {combine_n:,} / PD {proday_n:,}")
 
-_csv_col, _ = st.columns([1, 4])
-with _csv_col:
-    _csv_export = df_base.drop(columns=[c for c in ["_x", "_x_src", "_drafted_base"] if c in df_base.columns], errors="ignore")
-    st.download_button(
-        T["download_csv"],
-        data=_csv_export.to_csv(index=False).encode("utf-8"),
-        file_name=f"NFL_Combine_{'_'.join(selected_pos)}_{year_range[0]}-{year_range[1]}.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
-
 st.markdown("---")
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1404,6 +1393,9 @@ with tab_cmp:
         fig_radar = go.Figure()
         radar_data_rows = []
 
+        # Track per-position player index for color variation
+        _pos_player_idx: dict[str, int] = {}
+
         for pname in cmp_players:
             _rows = df_all[df_all["player"] == pname]
             if _rows.empty:
@@ -1431,7 +1423,17 @@ with tab_cmp:
             if not r_vals:
                 continue
 
-            pos_color = POS_COLORS.get(pos, THEME["accent"])
+            # Vary brightness per player within same position group
+            idx = _pos_player_idx.get(pos, 0)
+            _pos_player_idx[pos] = idx + 1
+            base_hex = POS_COLORS.get(pos, THEME["accent"]).lstrip("#")
+            base_r, base_g, base_b = (int(base_hex[i:i+2], 16) for i in (0, 2, 4))
+            # Shift: 0→normal, 1→+40 brightness, 2→-40 brightness, 3→+20
+            shift = [0, 45, -45, 22][idx % 4]
+            c_r = max(0, min(255, base_r + shift))
+            c_g = max(0, min(255, base_g + shift))
+            c_b = max(0, min(255, base_b + shift))
+            pos_color = f"#{c_r:02x}{c_g:02x}{c_b:02x}"
 
             fig_radar.add_trace(go.Scatterpolar(
                 r=r_vals + [r_vals[0]],
