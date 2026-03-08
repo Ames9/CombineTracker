@@ -715,6 +715,13 @@ with st.sidebar:
 
     # 選手検索 & ラベル
     st.subheader(T["search_header"])
+    # Hide "Select all" option that appears in multiselect dropdown
+    st.markdown(
+        "<style>[data-testid='stMultiSelect'] [title='Select all'],"
+        "[data-testid='stMultiSelect'] [aria-label='Select all'] { display: none !important; }"
+        "</style>",
+        unsafe_allow_html=True,
+    )
     _search_options, label_to_player = build_player_search_options(df_all)
     highlighted_labels = st.multiselect(
         T["search_label"],
@@ -802,7 +809,14 @@ df_2026_base  = df_f_x[_unknown_mask].copy()
 df_base       = df_f_x[~_unknown_mask].copy()
 
 # ── ヘッダー ───────────────────────────────────────────────────────────────────
+APP_VERSION = "v1.0"
+APP_DATE    = "2026/03/08"
+
 st.title(T["app_title"])
+st.caption(
+    f"{APP_VERSION}  ·  {APP_DATE}  ·  "
+    "Built by [Ames](https://x.com/ames_NFL) & Claude Code"
+)
 col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns(5)
 with col_h1:
     total_shown = len(df_base) + (len(df_2026_base) if show_2026 else 0)
@@ -1323,10 +1337,15 @@ with tab_hi:
                 opacity=0.85,
             ))
 
-    # ハイライト選手を縦線で表示
+    # ハイライト選手を縦線で表示（年度フィルタに関係なく全データから取得）
     if highlighted_players:
-        _all_hist = pd.concat([df_base, df_2026_base], ignore_index=True) if not df_2026_base.empty else df_base
-        hl_in_hist = _all_hist[_all_hist["player"].isin(highlighted_players)].copy()
+        _hist_ext = apply_udfa_label(df_all, udfa_threshold).copy()
+        _hist_ext["_x"] = resolve_measurement(_hist_ext, x_label, use_proday)
+        _hist_ext = _hist_ext[_hist_ext["_x"].notna()]
+        # 2026 prospectも追加（df_2026_baseから）
+        if not df_2026_base.empty:
+            _hist_ext = pd.concat([_hist_ext, df_2026_base[df_2026_base["_x"].notna()]], ignore_index=True)
+        hl_in_hist = _hist_ext[_hist_ext["player"].isin(highlighted_players)].copy()
         for _, row in hl_in_hist.iterrows():
             line_color = PREDRAFT_BORDER if row["drafted_label"] == "Unknown" else POS_COLORS.get(row.get("pos_group", ""), "#FF6F00")
             fig_hi.add_vline(
@@ -1565,3 +1584,7 @@ _career_note = (
 )
 st.caption(T["footer_line1"] + _career_note)
 st.caption(T["footer_line2"])
+st.caption(
+    f"{APP_VERSION}  ·  {APP_DATE}  ·  "
+    "Built by [Ames](https://x.com/ames_NFL) & Claude Code"
+)
