@@ -1393,8 +1393,9 @@ with tab_cmp:
         fig_radar = go.Figure()
         radar_data_rows = []
 
-        # Track per-position player index for color variation
-        _pos_player_idx: dict[str, int] = {}
+        # ── Pass 1: collect per-player data and find common labels ──
+        _player_data: list[dict] = []  # {pname, pos, prow, ref, available_labels}
+        _common_labels: set | None = None
 
         for pname in cmp_players:
             _rows = df_all[df_all["player"] == pname]
@@ -1404,7 +1405,7 @@ with tab_cmp:
             pos  = prow.get("pos_group", "")
             ref  = compute_position_percentiles(None, pos)
 
-            r_vals, r_labs, r_raw = [], [], []
+            available = set()
             for label in radar_labels_all:
                 if label not in ref:
                     continue
@@ -1412,8 +1413,38 @@ with tab_cmp:
                 val = prow.get(combine_col) if combine_col else None
                 if pd.isna(val) and proday_col:
                     val = prow.get(proday_col)
-                if val is None or pd.isna(val):
-                    continue
+                if val is not None and not pd.isna(val):
+                    available.add(label)
+
+            if not available:
+                continue
+            _player_data.append({"pname": pname, "pos": pos, "prow": prow, "ref": ref, "available": available})
+            _common_labels = available if _common_labels is None else _common_labels & available
+
+        if _common_labels is None:
+            _common_labels = set()
+
+        # Keep original order
+        shared_labels = [l for l in radar_labels_all if l in _common_labels]
+
+        if _player_data and not shared_labels:
+            st.warning(T.get("compare_no_common", "No measurements in common across selected players."))
+
+        # ── Pass 2: build traces using shared labels only ──
+        _pos_player_idx: dict[str, int] = {}
+
+        for pd_item in _player_data:
+            pname = pd_item["pname"]
+            pos   = pd_item["pos"]
+            prow  = pd_item["prow"]
+            ref   = pd_item["ref"]
+
+            r_vals, r_labs, r_raw = [], [], []
+            for label in shared_labels:
+                combine_col, proday_col = MEASUREMENTS[label]
+                val = prow.get(combine_col) if combine_col else None
+                if pd.isna(val) and proday_col:
+                    val = prow.get(proday_col)
                 pct = calc_percentile(val, ref[label], label)
                 if pct is not None:
                     r_vals.append(pct)
@@ -1428,7 +1459,6 @@ with tab_cmp:
             _pos_player_idx[pos] = idx + 1
             base_hex = POS_COLORS.get(pos, THEME["accent"]).lstrip("#")
             base_r, base_g, base_b = (int(base_hex[i:i+2], 16) for i in (0, 2, 4))
-            # Shift: 0→normal, 1→+40 brightness, 2→-40 brightness, 3→+20
             shift = [0, 45, -45, 22][idx % 4]
             c_r = max(0, min(255, base_r + shift))
             c_g = max(0, min(255, base_g + shift))
