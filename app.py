@@ -289,7 +289,6 @@ LABEL_WARN_THRESHOLD = 80
 HIST_BINS = 30
 KDE_BANDWIDTH = 0.5
 MIN_KDE_SAMPLES = 5
-MIN_RAS_MEASUREMENTS = 4
 
 
 def make_plot_layout(**overrides):
@@ -429,24 +428,6 @@ def calc_percentile(value, reference_values, label: str) -> float | None:
     return round(pct, 1)
 
 
-def compute_ras(player_row: pd.Series, reference_dict: dict) -> float | None:
-    """RAS風スコアを0-10で返す。参照分布に対するパーセンタイル平均"""
-    scores = []
-    for label, ref_vals in reference_dict.items():
-        combine_col, proday_col = MEASUREMENTS[label]
-        val = None
-        if combine_col and combine_col in player_row.index and pd.notna(player_row.get(combine_col)):
-            val = player_row[combine_col]
-        elif proday_col and proday_col in player_row.index and pd.notna(player_row.get(proday_col)):
-            val = player_row[proday_col]
-        if val is not None:
-            pct = calc_percentile(val, ref_vals, label)
-            if pct is not None:
-                scores.append(pct)
-    if len(scores) < MIN_RAS_MEASUREMENTS:
-        return None
-    return round(np.mean(scores) / 10.0, 2)
-
 
 def find_similar_players(player_row: pd.Series, df_hist: pd.DataFrame, pos_group: str, n: int = 8) -> pd.DataFrame:
     """z-scoreベースのユークリッド距離で類似選手をtop-n返す"""
@@ -565,8 +546,6 @@ _TR = {
         "compare_table":    "Measurement Details",
         "compare_no_data":  "Select at least 1 player to compare.",
         "compare_pct_note": "Percentiles vs. drafted players of same position group (all years). Higher = better (speed metrics inverted).",
-        "ras_label":        "RAS Score",
-        "ras_help":         "Relative Athletic Score: avg percentile across available measurements (0–10). vs. drafted players of same position.",
         "similar_header":   "🔗 Similar Players",
         "similar_select":   "Find players similar to…",
         "similar_help":     "Finds historical players with the most similar combine profile (z-score distance).",
@@ -650,8 +629,6 @@ _TR = {
         "compare_table":    "計測値詳細",
         "compare_no_data":  "比較する選手を1人以上選択してください。",
         "compare_pct_note": "同ポジション・全年度のドラフト指名選手との比較。高いほど良い（タイム系は反転）。",
-        "ras_label":        "RASスコア",
-        "ras_help":         "総合運動能力スコア（0〜10）：全計測のパーセンタイル平均。同ポジションのドラフト指名選手が基準。",
         "similar_header":   "🔗 類似選手",
         "similar_select":   "類似選手を探す基準となる選手",
         "similar_help":     "z-score距離で過去の最も近い運動能力プロフィールの選手を検索。",
@@ -993,26 +970,20 @@ with tab_sc:
         pos = row.get("pos_group", "")
         ref = compute_position_percentiles(None, pos)
         x_pct_str, y_pct_str = "", ""
-        combine_x, proday_x = MEASUREMENTS.get(x_label, (None, None))
-        col_x = combine_x or proday_x
-        if col_x and col_x in ref and pd.notna(row.get("_x")):
-            pct = calc_percentile(row["_x"], ref[col_x], x_label)
+        if x_label in ref and pd.notna(row.get("_x")):
+            pct = calc_percentile(row["_x"], ref[x_label], x_label)
             if pct is not None:
                 x_pct_str = f"  ({pct:.0f}th %ile)"
-        combine_y, proday_y = MEASUREMENTS.get(y_label, (None, None))
-        col_y = combine_y or proday_y
-        if col_y and col_y in ref and pd.notna(row.get("_y")):
-            pct = calc_percentile(row["_y"], ref[col_y], y_label)
+        if y_label in ref and pd.notna(row.get("_y")):
+            pct = calc_percentile(row["_y"], ref[y_label], y_label)
             if pct is not None:
                 y_pct_str = f"  ({pct:.0f}th %ile)"
-        ras = compute_ras(row, ref)
-        ras_str = f"<br>RAS: <b>{ras:.2f}</b>/10" if ras is not None else ""
         return (
             f"<b>⭐ {row['player']}</b>  [2026 Pre-Draft]<br>"
             f"{row.get('position', '?')} • {row.get('college', '')}<br>"
             f"{x_label}: {x_val}{x_pct_str}<br>"
             f"{y_label}: {y_val}{y_pct_str}<br>"
-            f"{src_line}{ras_str}"
+            f"{src_line}"
         )
 
     if show_2026 and not df_2026_plot.empty:
@@ -1441,27 +1412,25 @@ with tab_cmp:
             pos  = prow.get("pos_group", "")
             ref  = compute_position_percentiles(None, pos)
 
-            r_vals, r_labs = [], []
+            r_vals, r_labs, r_raw = [], [], []
             for label in radar_labels_all:
-                combine_col, proday_col = MEASUREMENTS[label]
-                col = combine_col or proday_col
-                if col not in ref:
+                if label not in ref:
                     continue
+                combine_col, proday_col = MEASUREMENTS[label]
                 val = prow.get(combine_col) if combine_col else None
                 if pd.isna(val) and proday_col:
                     val = prow.get(proday_col)
                 if val is None or pd.isna(val):
                     continue
-                pct = calc_percentile(val, ref[col], label)
+                pct = calc_percentile(val, ref[label], label)
                 if pct is not None:
                     r_vals.append(pct)
                     r_labs.append(label.split(" (")[0])
+                    r_raw.append(val)
 
             if not r_vals:
                 continue
 
-            ras = compute_ras(prow, ref)
-            ras_str = f" | RAS {ras:.2f}" if ras is not None else ""
             pos_color = POS_COLORS.get(pos, THEME["accent"])
 
             fig_radar.add_trace(go.Scatterpolar(
@@ -1470,12 +1439,12 @@ with tab_cmp:
                 fill="toself",
                 fillcolor=f"rgba{tuple(int(pos_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)) + (0.15,)}",
                 line=dict(color=pos_color, width=2),
-                name=f"{pname} ({pos}{ras_str})",
+                name=f"{pname} ({pos})",
+                hovertemplate="<b>%{theta}</b><br>%{r:.0f}th %ile<extra></extra>",
             ))
             radar_data_rows.append({
                 "Player": pname, "Position": pos, "Year": int(prow.get("year", 0)),
-                "RAS": f"{ras:.2f}/10" if ras is not None else "—",
-                **{l.split(" (")[0]: f"{v:.0f}th" for l, v in zip(r_labs, r_vals)},
+                **{l: f"{v:.1f}  ({p:.0f}th)" for l, v, p in zip(r_labs, r_raw, r_vals)},
             })
 
         fig_radar.update_layout(
@@ -1520,20 +1489,34 @@ with tab_cmp:
                 ]
                 similar_df = find_similar_players(_sim_row, _df_hist_sim, _sim_pos, n=sim_n)
                 if not similar_df.empty:
-                    display_cols = ["player", "year", "college", "pos_group", "drafted_label",
-                                    "draft_round", "draft_pick", "_similarity"]
+                    base_cols = ["player", "year", "college", "drafted_label",
+                                 "draft_round", "draft_pick", "_similarity"]
                     if HAS_CAREER:
-                        display_cols += ["career_seasons"]
-                    display_cols = [c for c in display_cols if c in similar_df.columns]
-                    similar_show = similar_df[display_cols].copy()
-                    similar_show.columns = [
-                        {"player": "Player", "year": "Year", "college": "College",
-                         "pos_group": "Pos", "drafted_label": "Status",
-                         "draft_round": "Round", "draft_pick": "Pick",
-                         "_similarity": "Similarity %", "career_seasons": "NFL Seasons"
-                         }.get(c, c) for c in display_cols
-                    ]
-                    similar_show["Similarity %"] = similar_show["Similarity %"].round(1)
+                        base_cols += ["career_seasons"]
+                    # 利用可能な測定値列を追加
+                    meas_display_cols = []
+                    for _lbl, (c_col, p_col) in MEASUREMENTS.items():
+                        if _lbl in ("Scout Grade ★",):
+                            continue
+                        col = c_col or p_col
+                        if col and col in similar_df.columns and similar_df[col].notna().any():
+                            meas_display_cols.append((col, _lbl.split(" (")[0]))
+                    all_display = [c for c in base_cols if c in similar_df.columns]
+                    similar_show = similar_df[all_display].copy()
+                    col_rename = {
+                        "player": "Player", "year": "Year", "college": "College",
+                        "drafted_label": "Status", "draft_round": "Round",
+                        "draft_pick": "Pick", "_similarity": "Sim %",
+                        "career_seasons": "NFL Seasons",
+                    }
+                    similar_show.columns = [col_rename.get(c, c) for c in all_display]
+                    similar_show["Sim %"] = similar_show["Sim %"].round(1)
+                    # 測定値列を追加（生値 + 対象選手との比較）
+                    for raw_col, short_lbl in meas_display_cols:
+                        ref_val = _sim_row.get(raw_col)
+                        similar_show[short_lbl] = similar_df[raw_col].apply(
+                            lambda v: f"{v:.2f}  (ref: {ref_val:.2f})" if pd.notna(v) and pd.notna(ref_val) else (f"{v:.2f}" if pd.notna(v) else "—")
+                        )
                     st.caption(f"Most similar to **{sim_player_name}** ({_sim_pos}, {int(_sim_row.get('year', 0))})")
                     st.dataframe(similar_show.reset_index(drop=True), use_container_width=True)
                 else:
