@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NFL Combine &amp; Pro Day Explorer</title>
+  <meta name="description" content="Interactive NFL Combine and Pro Day data explorer with scatter plots, histograms, player comparison, and Pro Performance analysis." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏈</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text">Loading NFL Combine data…</div>
+</div>
+
+<!-- Sidebar toggle button (mobile) -->
+<button class="sidebar-toggle" id="sidebar-toggle-btn" aria-label="Toggle sidebar">&#9776;</button>
+
+<!-- Sidebar overlay (mobile) -->
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="app">
+
+  <!-- ═══════════════════════════════════════════════════════
+       SIDEBAR
+  ════════════════════════════════════════════════════════ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-inner">
+
+      <!-- Language toggle -->
+      <div class="lang-toggle">
+        <button class="lang-btn active" id="lang-en" data-lang="EN">EN</button>
+        <button class="lang-btn" id="lang-jp" data-lang="JP">JP</button>
+      </div>
+
+      <!-- Brand -->
+      <div class="sidebar-brand">
+        <span class="sidebar-brand-icon">🏈</span>
+        <span class="sidebar-brand-text" id="sidebar-title">NFL Combine Explorer</span>
+      </div>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── Year ──────────────────────────────────────────── -->
+      <details class="sidebar-section" open id="section-year">
+        <summary>
+          <span class="sidebar-section-header" data-tr="year_header">Year</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group">
+            <div class="year-range">
+              <input type="number" id="year-start" value="2006" min="2006" max="2025" step="1" aria-label="Start year" />
+              <span class="year-range-sep">–</span>
+              <input type="number" id="year-end" value="2025" min="2006" max="2025" step="1" aria-label="End year" />
+            </div>
+            <div class="form-caption" id="year-caption">2006–2025 (20 years)</div>
+          </div>
+        </div>
+      </details>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── Position ───────────────────────────────────────── -->
+      <details class="sidebar-section" open id="section-pos">
+        <summary>
+          <span class="sidebar-section-header" data-tr="pos_header">Position Group</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group">
+            <div class="multiselect-wrap" id="pos-ms-wrap">
+              <input class="multiselect-input" id="pos-ms-input" type="text" placeholder="Select positions…" autocomplete="off" readonly />
+              <div class="ms-tags" id="pos-tags"></div>
+              <div class="ms-dropdown" id="pos-dropdown" style="display:none"></div>
+            </div>
+            <div class="form-warning" id="pos-warn" style="display:none" data-tr="pos_warn">Select at least one position.</div>
+          </div>
+        </div>
+      </details>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── Measurements ───────────────────────────────────── -->
+      <details class="sidebar-section" open id="section-meas">
+        <summary>
+          <span class="sidebar-section-header" data-tr="meas_header">Measurements</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group">
+            <label class="form-label" data-tr="x_axis">X axis</label>
+            <select id="x-label-select"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-tr="y_axis">Y axis</label>
+            <select id="y-label-select"></select>
+          </div>
+        </div>
+      </details>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── Data Source ────────────────────────────────────── -->
+      <details class="sidebar-section" open id="section-source">
+        <summary>
+          <span class="sidebar-section-header" data-tr="source_header">Data Source</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group">
+            <label class="toggle-row">
+              <input type="checkbox" id="use-proday-toggle" checked />
+              <span class="toggle-label" data-tr="proday_toggle">Include Pro Day data</span>
+            </label>
+            <div class="form-caption" data-tr="proday_cap">Combine measurement takes priority when available.</div>
+          </div>
+        </div>
+      </details>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── Player Search & Labels ─────────────────────────── -->
+      <details class="sidebar-section" open id="section-search">
+        <summary>
+          <span class="sidebar-section-header" data-tr="search_header">Player Search &amp; Labels</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group">
+            <label class="form-label" data-tr="search_label">Search &amp; highlight players</label>
+            <div class="search-wrap">
+              <input class="search-input" id="player-search-input" type="text" placeholder="Type a name to search…" autocomplete="off" />
+              <div class="search-dropdown" id="player-search-dropdown" style="display:none"></div>
+            </div>
+            <div class="ms-tags" id="highlighted-tags"></div>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row">
+              <input type="checkbox" id="show-all-labels" />
+              <span class="toggle-label" data-tr="all_labels">Show name labels for ALL visible players</span>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── Draft Status ───────────────────────────────────── -->
+      <details class="sidebar-section" open id="section-draft">
+        <summary>
+          <span class="sidebar-section-header" data-tr="draft_header">Draft Status</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group">
+            <label class="form-label" data-tr="draft_show">Show</label>
+            <div class="radio-group" id="draft-filter-group">
+              <label class="radio-row">
+                <input type="radio" name="draft-filter" value="all" checked />
+                <span class="radio-label" data-tr="draft_all">All players</span>
+              </label>
+              <label class="radio-row">
+                <input type="radio" name="draft-filter" value="drafted" />
+                <span class="radio-label" data-tr="draft_drafted">Drafted only</span>
+              </label>
+              <label class="radio-row">
+                <input type="radio" name="draft-filter" value="undrafted" />
+                <span class="radio-label" data-tr="draft_undrafted">Undrafted only</span>
+              </label>
+              <label class="radio-row">
+                <input type="radio" name="draft-filter" value="nfl" />
+                <span class="radio-label" data-tr="draft_nfl">NFL players</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row">
+              <input type="checkbox" id="show-2026-toggle" checked />
+              <span class="toggle-label" data-tr="show_2026">⭐ Show 2026 Pre-Draft players</span>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── UDFA ───────────────────────────────────────────── -->
+      <details class="sidebar-section" id="section-udfa">
+        <summary>
+          <span class="sidebar-section-header" data-tr="udfa_header">Undrafted NFL Players</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group" id="udfa-group">
+            <label class="form-label" data-tr="udfa_slider">Min. NFL seasons to qualify as Undrafted NFL</label>
+            <div class="range-row">
+              <input type="range" id="udfa-threshold" min="0" max="6" value="0" step="1" />
+              <span class="range-val" id="udfa-val">0</span>
+            </div>
+            <div class="form-caption" id="udfa-caption">Undrafted NFL highlighting is off (threshold = 0)</div>
+          </div>
+        </div>
+      </details>
+
+      <hr class="sidebar-divider" />
+
+      <!-- ── Display ────────────────────────────────────────── -->
+      <details class="sidebar-section" open id="section-display">
+        <summary>
+          <span class="sidebar-section-header" data-tr="display_header">Display</span>
+          <span class="sidebar-section-chevron">▶</span>
+        </summary>
+        <div class="sidebar-section-body">
+          <div class="form-group">
+            <label class="form-label" data-tr="color_mode">Color by</label>
+            <div class="radio-group horizontal" id="color-mode-group">
+              <label class="radio-row">
+                <input type="radio" name="color-mode" value="position" checked />
+                <span class="radio-label" data-tr="color_position">Position group</span>
+              </label>
+              <label class="radio-row">
+                <input type="radio" name="color-mode" value="round" />
+                <span class="radio-label" data-tr="color_round">Draft round</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-tr="marker_size">Marker size: <span id="marker-size-val">5</span></label>
+            <input type="range" id="marker-size" min="3" max="12" value="5" step="1" style="width:100%;accent-color:#58A6FF" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-tr="opacity">Opacity: <span id="opacity-val">0.65</span></label>
+            <input type="range" id="opacity-range" min="0.1" max="1.0" value="0.65" step="0.05" style="width:100%;accent-color:#58A6FF" />
+          </div>
+          <div class="form-group">
+            <label class="toggle-row">
+              <input type="checkbox" id="show-ellipse" />
+              <span class="toggle-label" data-tr="ellipse">Show 95% confidence ellipse</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row">
+              <input type="checkbox" id="show-stats" checked />
+              <span class="toggle-label" data-tr="stats_panel">Show statistics panel</span>
+            </label>
+          </div>
+        </div>
+      </details>
+
+    </div><!-- /sidebar-inner -->
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════════════
+       MAIN CONTENT
+  ════════════════════════════════════════════════════════ -->
+  <div class="main-content">
+
+    <!-- App Header -->
+    <div class="app-header">
+      <h1 class="app-title" id="app-title">NFL Combine &amp; Pro Day Explorer</h1>
+      <div class="app-subtitle">
+        <span id="app-version">v1.0 · 2026/03/08</span> ·
+        Built by <a href="https://x.com/ames_NFL" target="_blank">Ames</a> &amp; Claude Code
+      </div>
+      <!-- Metric cards -->
+      <div class="metric-cards">
+        <div class="metric-card">
+          <div class="metric-card-label" id="card-total-label">Total Players</div>
+          <div class="metric-card-value" id="card-total">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-label" id="card-drafted-label">Drafted</div>
+          <div class="metric-card-value" id="card-drafted">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-label" id="card-undrafted-label">Undrafted</div>
+          <div class="metric-card-value" id="card-undrafted">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-label" id="card-predraft-label">2026 Pre-Draft</div>
+          <div class="metric-card-value" id="card-predraft">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-label" id="card-source-label">Data source (X)</div>
+          <div class="metric-card-value" id="card-source" style="font-size:1.1rem">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar" role="tablist">
+      <button class="tab-btn active" role="tab" data-tab="scatter" id="tab-scatter">
+        📊 <span data-tr="tab_scatter">Scatter Plot</span>
+      </button>
+      <button class="tab-btn" role="tab" data-tab="histogram" id="tab-histogram">
+        📈 <span data-tr="tab_histogram">Histogram</span>
+      </button>
+      <button class="tab-btn" role="tab" data-tab="compare" id="tab-compare">
+        🔍 <span data-tr="tab_compare">Player Comparison</span>
+      </button>
+      <button class="tab-btn" role="tab" data-tab="pro" id="tab-pro">
+        🏈 <span data-tr="tab_pro">Pro Performance</span>
+      </button>
+    </div>
+
+    <!-- Tab panels -->
+    <div class="tab-panels">
+
+      <!-- ── Scatter Tab ──────────────────────────────────── -->
+      <div class="tab-panel active" id="panel-scatter" role="tabpanel">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px;gap:8px;">
+          <button class="btn btn-sm" id="scatter-download-csv">⬇️ <span data-tr="download_csv">Download CSV</span></button>
+        </div>
+        <div class="plot-container">
+          <div id="scatter-plot" class="plot-inner" style="height:660px"></div>
+        </div>
+
+        <!-- Stats panel -->
+        <div id="stats-panel-wrap">
+          <hr class="section-sep" />
+          <div class="stats-panel">
+            <div class="stats-section-title" data-tr="stats_header">Statistics by Position</div>
+            <div class="stats-grid" id="stats-grid"></div>
+          </div>
+
+          <!-- Box plot expander -->
+          <hr class="section-sep" />
+          <details class="expander" id="boxplot-expander">
+            <summary>
+              <span class="expander-chevron">▶</span>
+              <span data-tr="boxplot_label">Box Plot: Drafted vs Undrafted by Position</span>
+            </summary>
+            <div class="expander-body">
+              <div id="boxplot-info" class="alert alert-info" style="display:none">
+                <span class="alert-icon">ℹ️</span>
+                <span data-tr="boxplot_info">Box plot comparison requires 'All players' filter.</span>
+              </div>
+              <div id="boxplot-plot" style="height:480px"></div>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <!-- ── Histogram Tab ───────────────────────────────── -->
+      <div class="tab-panel" id="panel-histogram" role="tabpanel">
+        <div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap;">
+          <label class="toggle-row">
+            <input type="checkbox" id="hist-split" />
+            <span class="toggle-label" data-tr="hist_split">Split Drafted / Undrafted</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="show-2026-kde" checked />
+            <span class="toggle-label" data-tr="show_2026_kde">Show 2026 KDE lines</span>
+          </label>
+        </div>
+        <div class="plot-container">
+          <div id="histogram-plot" class="plot-inner" style="height:520px"></div>
+        </div>
+      </div>
+
+      <!-- ── Compare Tab ─────────────────────────────────── -->
+      <div class="tab-panel" id="panel-compare" role="tabpanel">
+        <div class="compare-layout">
+
+          <!-- Left: Radar -->
+          <div>
+            <div class="compare-section-title" data-tr="compare_radar">Percentile Radar Chart</div>
+            <div class="form-group">
+              <label class="form-label" data-tr="compare_select">Select up to 4 players to compare</label>
+              <div class="search-wrap" id="cmp-search-wrap">
+                <input class="search-input" id="cmp-player-input" type="text" placeholder="Type a name…" autocomplete="off" />
+                <div class="search-dropdown" id="cmp-search-dropdown" style="display:none"></div>
+              </div>
+              <div class="ms-tags" id="cmp-tags"></div>
+            </div>
+            <div id="cmp-no-data" class="alert alert-info">
+              <span class="alert-icon">ℹ️</span>
+              <span data-tr="compare_no_data">Select at least 1 player to compare.</span>
+            </div>
+            <div class="radar-container">
+              <div id="radar-plot" style="height:480px;display:none"></div>
+            </div>
+            <div class="compare-note" data-tr="compare_pct_note" id="cmp-note" style="display:none">
+              Percentiles vs. drafted players of same position group (all years). Higher = better (speed metrics inverted).
+            </div>
+            <div id="cmp-table-wrap" style="display:none;margin-top:12px">
+              <div class="compare-section-title" data-tr="compare_table">Measurement Details</div>
+              <div class="data-table-wrap">
+                <table class="data-table" id="cmp-table">
+                  <thead><tr id="cmp-thead"></tr></thead>
+                  <tbody id="cmp-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Similar Players -->
+          <div>
+            <div class="compare-section-title" data-tr="similar_header">Similar Players</div>
+            <div class="form-group">
+              <label class="form-label" data-tr="similar_select">Find players similar to…</label>
+              <div class="search-wrap" id="sim-search-wrap">
+                <input class="search-input" id="sim-player-input" type="text" placeholder="Type a name…" autocomplete="off" />
+                <div class="search-dropdown" id="sim-search-dropdown" style="display:none"></div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-tr="similar_n">Number of results: <span id="sim-n-val">8</span></label>
+              <input type="range" id="sim-n" min="5" max="15" value="8" step="1" style="width:100%;accent-color:#58A6FF" />
+            </div>
+            <div id="sim-result-wrap">
+              <div id="sim-no-data" class="alert alert-info">
+                <span class="alert-icon">ℹ️</span>
+                <span data-tr="compare_no_data">Select at least 1 player to compare.</span>
+              </div>
+              <div id="sim-result-content" style="display:none">
+                <div class="compare-section-title" data-tr="similar_table">Most Similar Historical Players</div>
+                <div class="form-caption" id="sim-caption"></div>
+                <div class="data-table-wrap" style="margin-top:6px">
+                  <table class="data-table" id="sim-table">
+                    <thead><tr id="sim-thead"></tr></thead>
+                    <tbody id="sim-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── Pro Performance Tab ─────────────────────────── -->
+      <div class="tab-panel" id="panel-pro" role="tabpanel">
+
+        <!-- Pro header -->
+        <div class="pro-header">
+          <div>
+            <div class="pro-title" id="pro-title" data-tr="pro_title">Edge Rusher: Combine × Pro Pass Rush</div>
+            <div class="pro-caption" id="pro-caption" data-tr="pro_caption">Combines pre-draft measurements with NFL Pro Pass Rush stats. Explore which Combine attributes correlate with pass rush success.</div>
+          </div>
+          <div class="pro-stats-row" style="margin-bottom:0">
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="pro_matched">Players matched</div>
+              <div class="pro-stat-value" id="pro-matched-val">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label">Player-Seasons</div>
+              <div class="pro-stat-value" id="pro-seasons-val">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- No data warning -->
+        <div id="pro-no-file-warn" class="alert alert-warning" style="display:none">
+          <span class="alert-icon">⚠️</span>
+          <span data-tr="pro_no_file">Pass Rush data not found.</span>
+        </div>
+
+        <div id="pro-content" style="display:none">
+          <!-- View mode & Aggregation mode -->
+          <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
+            <div>
+              <div class="form-label" data-tr="view_mode">View mode</div>
+              <div class="pro-view-mode" style="margin-top:4px">
+                <button class="view-mode-btn active" id="pro-view-scatter" data-view="scatter">
+                  📊 <span data-tr="scatter_view">Scatter</span>
+                </button>
+                <button class="view-mode-btn" id="pro-view-heatmap" data-view="heatmap">
+                  🗺️ <span data-tr="heatmap_view">2D Heatmap</span>
+                </button>
+              </div>
+            </div>
+            <div>
+              <div class="form-label" data-tr="agg_mode_label">Aggregation mode</div>
+              <div class="pro-view-mode" style="margin-top:4px">
+                <button class="view-mode-btn active" id="pro-agg-career" data-agg="career">
+                  📊 <span data-tr="career_agg">Career</span>
+                </button>
+                <button class="view-mode-btn" id="pro-agg-season" data-agg="season">
+                  📅 <span data-tr="season_agg">Per Season</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Scatter controls -->
+          <div id="pro-scatter-controls" class="pro-controls">
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="pro_x">X axis: Combine metric</label>
+              <select id="pro-x-select"></select>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="pro_y">Y axis: Pro metric (career)</label>
+              <select id="pro-y-select"></select>
+            </div>
+            <div class="chart-control-group">
+              <label class="toggle-row" style="margin-top:20px">
+                <input type="checkbox" id="pro-use-pd" checked />
+                <span class="toggle-label" data-tr="pro_use_pd">Include Pro Day data</span>
+              </label>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="pro_min_snaps">Min. Pass Rush snaps: <span id="pro-snaps-val">200</span></label>
+              <input type="range" id="pro-min-snaps" min="0" max="600" value="200" step="50" style="width:100%;accent-color:#58A6FF" />
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="pro_pos">Position</label>
+              <div class="multiselect-wrap" id="pro-pos-ms-wrap">
+                <input class="multiselect-input" id="pro-pos-input" type="text" placeholder="DE, OLB…" autocomplete="off" readonly />
+                <div class="ms-tags" id="pro-pos-tags"></div>
+                <div class="ms-dropdown" id="pro-pos-dropdown" style="display:none"></div>
+              </div>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="pro_draft_yr">Draft year range</label>
+              <div class="year-range">
+                <input type="number" id="pro-year-start" value="2008" min="2006" max="2024" step="1" />
+                <span class="year-range-sep">–</span>
+                <input type="number" id="pro-year-end" value="2022" min="2006" max="2024" step="1" />
+              </div>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="pro_color_by">Color by</label>
+              <div class="radio-group horizontal" id="pro-color-by-group">
+                <label class="radio-row">
+                  <input type="radio" name="pro-color-by" value="year" checked />
+                  <span class="radio-label" data-tr="pro_color_yr">Draft Year</span>
+                </label>
+                <label class="radio-row">
+                  <input type="radio" name="pro-color-by" value="position" />
+                  <span class="radio-label" data-tr="pro_color_pos">Position</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Heatmap controls -->
+          <div id="pro-heatmap-controls" style="display:none" class="pro-controls">
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="hm_x">X axis: Combine ①</label>
+              <select id="hm-x-select"></select>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="hm_y">Y axis: Combine ②</label>
+              <select id="hm-y-select"></select>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="hm_z">Color: Pro metric</label>
+              <select id="hm-z-select"></select>
+            </div>
+            <div class="chart-control-group">
+              <label class="toggle-row" style="margin-top:20px">
+                <input type="checkbox" id="hm-use-pd" checked />
+                <span class="toggle-label" data-tr="pro_use_pd">Include Pro Day data</span>
+              </label>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="pro_min_snaps">Min. Pass Rush snaps: <span id="hm-snaps-val">200</span></label>
+              <input type="range" id="hm-min-snaps" min="0" max="600" value="200" step="50" style="width:100%;accent-color:#58A6FF" />
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="hm_pos">Position</label>
+              <div class="multiselect-wrap" id="hm-pos-ms-wrap">
+                <input class="multiselect-input" id="hm-pos-input" type="text" placeholder="DE, OLB…" autocomplete="off" readonly />
+                <div class="ms-tags" id="hm-pos-tags"></div>
+                <div class="ms-dropdown" id="hm-pos-dropdown" style="display:none"></div>
+              </div>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="hm_yr">Draft year range</label>
+              <div class="year-range">
+                <input type="number" id="hm-year-start" value="2008" min="2006" max="2024" step="1" />
+                <span class="year-range-sep">–</span>
+                <input type="number" id="hm-year-end" value="2022" min="2006" max="2024" step="1" />
+              </div>
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="hm_grid">Grid size (N×N): <span id="hm-bins-val">12</span></label>
+              <input type="range" id="hm-bins" min="5" max="25" value="12" step="1" style="width:100%;accent-color:#58A6FF" />
+            </div>
+            <div class="chart-control-group">
+              <label class="form-label" data-tr="hm_agg">Aggregation</label>
+              <div class="radio-group horizontal">
+                <label class="radio-row">
+                  <input type="radio" name="hm-agg" value="mean" checked />
+                  <span class="radio-label" data-tr="hm_mean">Mean</span>
+                </label>
+                <label class="radio-row">
+                  <input type="radio" name="hm-agg" value="median" />
+                  <span class="radio-label" data-tr="hm_median">Median</span>
+                </label>
+              </div>
+            </div>
+            <div class="chart-control-group">
+              <label class="toggle-row" style="margin-top:20px">
+                <input type="checkbox" id="hm-show-scatter" checked />
+                <span class="toggle-label" data-tr="hm_overlay">Show individual players</span>
+              </label>
+            </div>
+          </div>
+
+          <hr class="section-sep" />
+
+          <!-- Pro plot -->
+          <div class="plot-container">
+            <div id="pro-plot" style="height:580px"></div>
+          </div>
+
+          <!-- Stats row (scatter mode) -->
+          <div id="pro-scatter-stats" class="pro-stats-row" style="margin-bottom:14px">
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="pro_n">Players (n)</div>
+              <div class="pro-stat-value" id="pro-n-val">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="pro_r">Correlation r</div>
+              <div class="pro-stat-value" id="pro-r-val">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="pro_r2">R²</div>
+              <div class="pro-stat-value" id="pro-r2-val">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="pro_pval">p-value</div>
+              <div class="pro-stat-value" id="pro-pval-val">—</div>
+              <div class="pro-stat-delta" id="pro-pval-sig">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="pro_slope">OLS slope</div>
+              <div class="pro-stat-value" id="pro-slope-val">—</div>
+            </div>
+          </div>
+
+          <!-- Heatmap summary stats -->
+          <div id="pro-heatmap-stats" style="display:none" class="pro-stats-row" style="margin-bottom:14px">
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="hm_n">Players (n)</div>
+              <div class="pro-stat-value" id="hm-n-val">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label" data-tr="hm_valid_cells">Valid cells</div>
+              <div class="pro-stat-value" id="hm-cells-val">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label">Mean Z</div>
+              <div class="pro-stat-value" id="hm-meanz-val">—</div>
+            </div>
+            <div class="pro-stat-card">
+              <div class="pro-stat-label">Median Z</div>
+              <div class="pro-stat-value" id="hm-medianz-val">—</div>
+            </div>
+          </div>
+
+          <!-- Threshold analysis (scatter only) -->
+          <details class="expander" id="thresh-expander">
+            <summary>
+              <span class="expander-chevron">▶</span>
+              <span data-tr="pro_thresh_hdr">Threshold Analysis — Does the Combine metric split Pro success?</span>
+            </summary>
+            <div class="expander-body">
+              <div class="form-caption" data-tr="pro_thresh_note">"Success" = Y ≥ median  (or ≤ median when lower is better)</div>
+              <div class="form-group" style="margin-top:8px">
+                <label class="form-label" data-tr="pro_thresh_slider">Set threshold for X axis: <span id="thresh-val">—</span></label>
+                <input type="range" id="thresh-slider" style="width:100%;accent-color:#58A6FF" />
+              </div>
+              <div class="threshold-boxes">
+                <div class="threshold-box" id="thresh-above">—</div>
+                <div class="threshold-box" id="thresh-below">—</div>
+              </div>
+              <div class="threshold-conclusion" id="thresh-conclusion"></div>
+              <div id="thresh-bar-plot" style="height:280px;margin-top:8px"></div>
+            </div>
+          </details>
+
+          <!-- Data table (scatter only) -->
+          <details class="expander" id="pro-table-expander">
+            <summary>
+              <span class="expander-chevron">▶</span>
+              <span data-tr="pro_table_hdr">Data Table</span>
+            </summary>
+            <div class="expander-body">
+              <button class="btn btn-sm mb-8" id="pro-table-download">⬇️ Download CSV</button>
+              <div class="data-table-wrap">
+                <table class="data-table" id="pro-data-table">
+                  <thead><tr id="pro-thead"></tr></thead>
+                  <tbody id="pro-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+
+        </div><!-- /pro-content -->
+      </div>
+
+    </div><!-- /tab-panels -->
+
+    <!-- Footer -->
+    <footer>
+      <div id="footer-line1">Data: NFL Combine (official) + Pro Day measurements | Draft data: nflverse (2006–2024) + manual (2025)</div>
+      <div id="footer-line2" style="margin-top:2px">Combine &amp; Pro Day data sourced from Roy Carpenter's nfl-draft-data</div>
+      <div style="margin-top:4px;color:#6E7681">
+        v1.0 · 2026/03/08 · Built by <a href="https://x.com/ames_NFL" target="_blank">Ames</a> &amp; Claude Code
+      </div>
+    </footer>
+
+  </div><!-- /main-content -->
+</div><!-- /app -->
+
+<!-- External libraries -->
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<!-- App scripts -->
+<script src="constants.js"></script>
+<script src="stats.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
