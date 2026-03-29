@@ -1,0 +1,61 @@
+season,rank,player,team,prwr_pct,wins,plays,notes
+2019,1,Robert Quinn,DAL,33%,,,Image chart only - no wins/plays data
+2019,2,T.J. Watt,PIT,28%,,,Image chart only - no wins/plays data
+2019,3,Demarcus Lawrence,DAL,27%,,,Image chart only - no wins/plays data
+2019,4,Myles Garrett,CLE,26%,,,Image chart only - no wins/plays data
+2019,5,Shaquil Barrett,TB,25%,,,Image chart only - no wins/plays data
+2019,6,Joey Bosa,LAC,25%,,,Image chart only - no wins/plays data
+2019,7,Jadeveon Clowney,SEA,24%,,,Image chart only - no wins/plays data
+2019,8,Za'Darius Smith,GB,23%,,,Image chart only - no wins/plays data
+2019,9,Dante Fowler,LAR,23%,,,Image chart only - no wins/plays data
+2019,10,Preston Smith,GB,23%,,,Image chart only - no wins/plays data
+2020,1,T.J. Watt,PIT,29%,,,Image chart only - no wins/plays data
+2020,2,Jerry Hughes,BUF,29%,,,Image chart only - no wins/plays data
+2020,3,Myles Garrett,CLE,26%,,,Image chart only - no wins/plays data
+2020,4,Brian Burns,CAR,25%,,,Image chart only - no wins/plays data
+2020,5,Joey Bosa,LAC,25%,,,Image chart only - no wins/plays data
+2020,6,Justin Houston,IND,25%,,,Image chart only - no wins/plays data
+2020,7,Chase Young,WAS,22%,,,Image chart only - no wins/plays data
+2020,8,J.J. Watt,HOU,22%,,,Image chart only - no wins/plays data
+2020,9,Harold Landry,TEN,22%,,,Image chart only - no wins/plays data
+2020,10,DeMarcus Lawrence,DAL,21%,,,Image chart only - no wins/plays data
+2021,1,Myles Garrett,CLE,28%,,,Image chart only - no wins/plays data
+2021,2,Robert Quinn,CHI,26%,,,Image chart only - no wins/plays data
+2021,3,Josh Sweat,PHI,26%,,,Image chart only - no wins/plays data
+2021,4,Jadeveon Clowney,CLE,24%,,,Image chart only - no wins/plays data
+2021,5,T.J. Watt,PIT,24%,,,Image chart only - no wins/plays data
+2021,6,Nick Bosa,SF,23%,,,Image chart only - no wins/plays data
+2021,7,Derek Barnett,PHI,23%,,,Image chart only - no wins/plays data
+2021,8,Haason Reddick,CAR,23%,,,Image chart only - no wins/plays data
+2021,9,Trey Hendrickson,CIN,23%,,,Image chart only - no wins/plays data
+2021,10,Maxx Crosby,LV,22%,,,Image chart only - no wins/plays data
+2022,1,Micah Parsons,DAL,30%,,,Image chart only - no wins/plays data
+2022,2,Haason Reddick,PHI,28%,,,Image chart only - no wins/plays data
+2022,3,Myles Garrett,CLE,27%,,,Image chart only - no wins/plays data
+2022,4,Trey Hendrickson,CIN,24%,,,Image chart only - no wins/plays data
+2022,5,Jaelan Phillips,MIA,24%,,,Image chart only - no wins/plays data
+2022,6,Von Miller,BUF,23%,,,Image chart only - no wins/plays data
+2022,7,Bradley Chubb,MIA,23%,,,Image chart only - no wins/plays data
+2022,8,T.J. Watt,PIT,22%,,,Image chart only - no wins/plays data
+2022,9,Nick Bosa,SF,22%,,,Image chart only - no wins/plays data
+2022,10,Josh Sweat,PHI,21%,,,Image chart only - no wins/plays data
+2023,1,Micah Parsons,DAL,35%,84,238,Full data from text extraction
+2023,2,Myles Garrett,CLE,30%,82,269,Full data from text extraction
+2023,3,Will Anderson Jr.,HOU,26%,57,221,Full data from text extraction
+2023,4,T.J. Watt,PIT,25%,75,296,Full data from text extraction
+2023,5,Jadeveon Clowney,BAL,25%,66,267,Full data from text extraction
+2023,6,Jonathan Greenard,HOU,22%,54,241,Full data from text extraction
+2023,7,Haason Reddick,PHI,22%,67,303,Full data from text extraction
+2023,8,Bryce Huff,NYJ,22%,46,209,Full data from text extraction
+2023,9,Bradley Chubb,MIA,22%,55,254,Full data from text extraction
+2023,10,Trey Hendrickson,CIN,21%,56,264,Full data from text extraction
+2023,11,Brian Burns,CAR,21%,40,189,Full data from text extraction
+2023,12,Alex Highsmith,PIT,21%,59,282,Full data from text extraction
+2023,13,Arden Key,TEN,20%,42,207,Full data from text extraction
+2023,14,Josh Sweat,PHI,20%,64,319,Full data from text extraction
+2023,15,Chase Young,WAS,19%,55,285,Full data from text extraction
+2023,16,Samson Ebukam,IND,19%,49,256,Full data from text extraction
+2023,17,Boye Mafe,SEA,19%,49,258,Full data from text extraction
+2023,18,Kyle Van Noy,BAL,19%,32,171,Full data from text extraction
+2023,19,Nick Bosa,SF,19%,59,317,Full data from text extraction
+2023,20,Andrew Van Ginkel,MIA,18%,32,178,Full data from text extraction

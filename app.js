@@ -8,9 +8,6 @@
 // ─── Global Data ───────────────────────────────────────────────────────────────
 let RAW_DATA      = [];   // All rows from combine CSV (year < 2026)
 let DATA_2026     = [];   // Rows with year === 2026
-let PASSRUSH_RAW  = [];   // All rows from passrush CSV
-let MERGED_EDGE   = [];   // Career-aggregated Edge join
-let MERGED_SEASON = [];   // Season-level Edge join
 let POS_TO_GROUP  = {};   // position -> pos_group
 let POS_PERCENTILES = {}; // { pos_group: { label: [sorted drafted values] } }
 
@@ -39,32 +36,19 @@ const STATE = {
   comparePlayers:    [],
   simPlayer:         null,
   simN:              8,
-  proViewMode:       'scatter',
-  proAggMode:        'career',
-  proXLabel:         'Arm Length (in)',
-  proYLabel:         'QB Pressure Rate (career %)',
-  proUseProDay:      true,
-  proMinSnaps:       200,
-  proPosFilter:      ['DE', 'OLB'],
-  proYearStart:      2008,
-  proYearEnd:        2022,
-  proColorBy:        'year',
-  proThreshold:      null,
-  hmXLabel:          'Arm Length (in)',
-  hmYLabel:          '40-Yard Dash (s)',
-  hmZLabel:          'QB Pressure Rate (career %)',
-  hmMinSnaps:        200,
-  hmPosFilter:       ['DE', 'OLB'],
-  hmYearStart:       2008,
-  hmYearEnd:         2022,
-  hmNBins:           12,
-  hmAggFunc:         'mean',
-  hmShowScatter:     true,
-  hmUseProDay:       true,
 };
 
 // ─── DOM Helper ────────────────────────────────────────────────────────────────
 const el = id => document.getElementById(id);
+
+// ─── Color Helpers ─────────────────────────────────────────────────────────────
+function hexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
 
 // ─── Translation Helper ────────────────────────────────────────────────────────
 function t(key) {
@@ -169,13 +153,6 @@ const NUMERIC_COLS = [
   'career_seasons','nfl_rookie_season','nfl_last_season',
 ];
 
-const PASSRUSH_NUMERIC_COLS = [
-  'season','games_played','games_started','game_snaps','team_snaps',
-  'pass_rush_snaps','pass_rush_rate','get_off_time','qb_pressures',
-  'qb_pressure_rate','time_to_pressure','sacks','sack_rate','time_to_sack',
-  'qb_defeats','turn_pressures',
-];
-
 function preprocessRow(row) {
   for (const col of NUMERIC_COLS) {
     if (col in row) row[col] = parseNum(row[col]);
@@ -185,16 +162,6 @@ function preprocessRow(row) {
   row.pos_group = POS_TO_GROUP[rawPos] || row.position_group || rawPos || 'Unknown';
   // Name corrections / display name
   row._display = row.display_name || row.player || `${row.first_name || ''} ${row.last_name || ''}`.trim();
-  return row;
-}
-
-function preprocessPassrushRow(row) {
-  for (const col of PASSRUSH_NUMERIC_COLS) {
-    if (col in row) row[col] = parseNum(row[col]);
-  }
-  // Apply name corrections
-  const rawName = (row.name || '').trim();
-  row._normName = PR_NAME_CORRECTIONS[rawName] || rawName;
   return row;
 }
 
@@ -216,88 +183,6 @@ function calcPercentile(value, refValues, label) {
   let pct = percentileOfScore(refValues, value);
   if (LOWER_IS_BETTER.has(label)) pct = 100 - pct;
   return pct;
-}
-
-// ─── Merged Edge Data ──────────────────────────────────────────────────────────
-function buildMergedEdgeData() {
-  // Group passrush by normalized name: career aggregates
-  const byName = {};
-  for (const row of PASSRUSH_RAW) {
-    const name = row._normName;
-    if (!name) continue;
-    if (!byName[name]) {
-      byName[name] = {
-        name,
-        positions: new Set(),
-        seasons: [],
-        total_pr_snaps: 0,
-        total_qbp: 0,
-        total_sacks: 0,
-        get_off_times: [],
-        ttps: [],
-      };
-    }
-    const b = byName[name];
-    b.positions.add(row.position || '');
-    b.total_pr_snaps += (isFinite(row.pass_rush_snaps) ? row.pass_rush_snaps : 0);
-    b.total_qbp     += (isFinite(row.qb_pressures) ? row.qb_pressures : 0);
-    b.total_sacks   += (isFinite(row.sacks) ? row.sacks : 0);
-    if (isFinite(row.get_off_time) && row.get_off_time > 0) b.get_off_times.push(row.get_off_time);
-    if (isFinite(row.time_to_pressure) && row.time_to_pressure > 0) b.ttps.push(row.time_to_pressure);
-    b.seasons.push(row.season);
-  }
-
-  // Build career aggregated records
-  const careerMap = {};
-  for (const [name, b] of Object.entries(byName)) {
-    const uniqueSeasons = new Set(b.seasons).size;
-    if (uniqueSeasons === 0) continue;
-    careerMap[name] = {
-      career_qbpr:           b.total_pr_snaps > 0 ? (b.total_qbp / b.total_pr_snaps) * 100 : NaN,
-      pressures_per_season:  b.total_qbp / uniqueSeasons,
-      sacks_per_season:      b.total_sacks / uniqueSeasons,
-      total_qbp:             b.total_qbp,
-      total_sacks:           b.total_sacks,
-      total_pr_snaps:        b.total_pr_snaps,
-      avg_get_off:           b.get_off_times.length > 0 ? nanMean(b.get_off_times) : NaN,
-      avg_ttp:               b.ttps.length > 0 ? nanMean(b.ttps) : NaN,
-      pro_seasons:           uniqueSeasons,
-      pro_positions:         [...b.positions].filter(Boolean).join('/'),
-    };
-  }
-
-  // Join with combine data (Edge position group)
-  MERGED_EDGE = [];
-  const edgeRows = RAW_DATA.filter(r => r.pos_group === 'Edge');
-  for (const row of edgeRows) {
-    const name = row._display;
-    const career = careerMap[name];
-    if (!career) continue;
-    if (career.total_pr_snaps === 0) continue;
-    MERGED_EDGE.push({ ...row, ...career });
-  }
-}
-
-function buildMergedEdgeSeasonData() {
-  // Join combine with each season row
-  MERGED_SEASON = [];
-  const edgeRows = RAW_DATA.filter(r => r.pos_group === 'Edge');
-  const combineByName = {};
-  for (const row of edgeRows) {
-    const name = row._display;
-    if (!combineByName[name]) combineByName[name] = [];
-    combineByName[name].push(row);
-  }
-
-  for (const prRow of PASSRUSH_RAW) {
-    const name = prRow._normName;
-    if (!name) continue;
-    const combineRows = combineByName[name];
-    if (!combineRows || combineRows.length === 0) continue;
-    // Use first match (same player)
-    const combineRow = combineRows[0];
-    MERGED_SEASON.push({ ...combineRow, ...prRow, _display: name });
-  }
 }
 
 // ─── Filtered Data ─────────────────────────────────────────────────────────────
@@ -588,6 +473,7 @@ function renderScatter() {
   }
 
   const layout = makePlotLayout({
+    height: 660,
     xaxis: {
       title: xLabel,
       gridcolor: THEME.grid, linecolor: THEME.border, zerolinecolor: THEME.border,
@@ -826,6 +712,7 @@ function renderHistogram() {
   }
 
   const layout = makePlotLayout({
+    height: 520,
     barmode: 'overlay',
     xaxis: {
       title: xLabel,
@@ -964,7 +851,7 @@ function renderCompare() {
         fill: 'toself',
         name: row._display,
         line: { color: radarColors[i % radarColors.length], width: 2 },
-        fillcolor: radarColors[i % radarColors.length].replace(')', ',0.15)').replace('rgb', 'rgba').replace('#', 'rgba(').replace('rgba(', 'rgba('),
+        fillcolor: hexToRgba(radarColors[i % radarColors.length], 0.15),
         opacity: 0.85,
         hovertemplate: '%{theta}<br>Percentile: %{r:.1f}<extra>' + row._display + '</extra>',
       });
@@ -1083,542 +970,6 @@ function renderCompare() {
   }
 }
 
-// ─── PRO PERFORMANCE ──────────────────────────────────────────────────────────
-function getProFilteredData() {
-  const isCareer = STATE.proAggMode === 'career';
-  const srcData  = isCareer ? MERGED_EDGE : MERGED_SEASON;
-
-  const xLabel    = isCareer ? STATE.proXLabel : STATE.proXLabel;
-  const yLabel    = isCareer ? STATE.proYLabel : STATE.proYLabel;
-  const ppmMap    = isCareer ? PPM : PPM_SEASON;
-  const yCols     = ppmMap[yLabel];
-  const yCol      = yCols ? yCols[0] : null;
-
-  const minSnaps  = isCareer ? STATE.proMinSnaps : STATE.proMinSnaps;
-  const posFilter = STATE.proPosFilter;
-  const yrStart   = STATE.proYearStart;
-  const yrEnd     = STATE.proYearEnd;
-
-  return srcData.filter(row => {
-    // Year filter on draft year
-    const yr = row.year;
-    if (!isFinite(yr) || yr < yrStart || yr > yrEnd) return false;
-    // Position filter
-    const pos = (row.position || row.pos_group || '').toUpperCase();
-    if (posFilter.length > 0 && !posFilter.some(p => pos.includes(p.toUpperCase()))) return false;
-    // Snaps filter
-    const snaps = isCareer ? row.total_pr_snaps : row.pass_rush_snaps;
-    if (!isFinite(snaps) || snaps < minSnaps) return false;
-    // Must have valid X and Y
-    const xv = resolveMeasurement(row, xLabel, STATE.proUseProDay);
-    if (!isFinite(xv)) return false;
-    if (yCol && !isFinite(row[yCol])) return false;
-    return true;
-  });
-}
-
-function getHmFilteredData() {
-  const srcData = MERGED_EDGE;
-  const posFilter = STATE.hmPosFilter;
-  const yrStart   = STATE.hmYearStart;
-  const yrEnd     = STATE.hmYearEnd;
-  const minSnaps  = STATE.hmMinSnaps;
-  const ppmMap    = STATE.proAggMode === 'career' ? PPM : PPM_SEASON;
-  const zLabel    = STATE.hmZLabel;
-  const zCols     = ppmMap[zLabel];
-  const zCol      = zCols ? zCols[0] : null;
-
-  return srcData.filter(row => {
-    const yr = row.year;
-    if (!isFinite(yr) || yr < yrStart || yr > yrEnd) return false;
-    const pos = (row.position || '').toUpperCase();
-    if (posFilter.length > 0 && !posFilter.some(p => pos.includes(p.toUpperCase()))) return false;
-    const snaps = row.total_pr_snaps;
-    if (!isFinite(snaps) || snaps < minSnaps) return false;
-    const xv = resolveMeasurement(row, STATE.hmXLabel, STATE.hmUseProDay);
-    const yv = resolveMeasurement(row, STATE.hmYLabel, STATE.hmUseProDay);
-    if (!isFinite(xv) || !isFinite(yv)) return false;
-    if (zCol && !isFinite(row[zCol])) return false;
-    return true;
-  });
-}
-
-function renderPro() {
-  // Show/hide no-data warning
-  const noFileWarn = el('pro-no-file-warn');
-  const proContent = el('pro-content');
-
-  if (PASSRUSH_RAW.length === 0) {
-    noFileWarn.style.display = 'flex';
-    proContent.style.display = 'none';
-    return;
-  }
-  noFileWarn.style.display = 'none';
-  proContent.style.display = 'block';
-
-  // Update matched counts
-  el('pro-matched-val').textContent = MERGED_EDGE.length.toLocaleString();
-  el('pro-seasons-val').textContent  = MERGED_SEASON.length.toLocaleString();
-
-  if (STATE.proViewMode === 'scatter') {
-    el('pro-scatter-controls').style.display  = '';
-    el('pro-heatmap-controls').style.display  = 'none';
-    el('pro-scatter-stats').style.display     = '';
-    el('pro-heatmap-stats').style.display     = 'none';
-    el('thresh-expander').style.display       = '';
-    el('pro-table-expander').style.display    = '';
-    renderProScatter();
-  } else {
-    el('pro-scatter-controls').style.display  = 'none';
-    el('pro-heatmap-controls').style.display  = '';
-    el('pro-scatter-stats').style.display     = 'none';
-    el('pro-heatmap-stats').style.display     = '';
-    el('thresh-expander').style.display       = 'none';
-    el('pro-table-expander').style.display    = 'none';
-    renderProHeatmap();
-  }
-}
-
-function renderProScatter() {
-  const isCareer  = STATE.proAggMode === 'career';
-  const ppmMap    = isCareer ? PPM : PPM_SEASON;
-  const xLabel    = STATE.proXLabel;
-  const yLabel    = STATE.proYLabel;
-  const yCols     = ppmMap[yLabel];
-  const yCol      = yCols ? yCols[0] : null;
-  const yLower    = yCols ? yCols[1] : false;
-
-  const filtered = getProFilteredData();
-
-  if (filtered.length < 3) {
-    const msg = t('pro_no_data').replace('{n}', filtered.length);
-    Plotly.react('pro-plot', [{
-      type: 'scatter', mode: 'text',
-      x: [0.5], y: [0.5], text: [msg],
-      textfont: { color: THEME.muted, size: 14 },
-    }], makePlotLayout(), { responsive: true, displayModeBar: false });
-    ['pro-n-val','pro-r-val','pro-r2-val','pro-pval-val','pro-slope-val'].forEach(id => el(id).textContent = '—');
-    el('pro-pval-sig').textContent = '—';
-    return;
-  }
-
-  const xs = filtered.map(r => resolveMeasurement(r, xLabel, STATE.proUseProDay));
-  const ys = filtered.map(r => yCol ? r[yCol] : NaN);
-
-  // Regression
-  const reg = linregress(xs, ys);
-  if (reg) {
-    el('pro-n-val').textContent     = filtered.length;
-    el('pro-r-val').textContent     = reg.r.toFixed(3);
-    el('pro-r2-val').textContent    = reg.r2.toFixed(3);
-    el('pro-pval-val').textContent  = fmtPval(reg.pvalue);
-    el('pro-pval-sig').textContent  = reg.pvalue < 0.05 ? t('pro_sig') : t('pro_not_sig');
-    el('pro-slope-val').textContent = reg.slope.toFixed(4);
-  }
-
-  const traces = [];
-
-  // Color scale
-  if (STATE.proColorBy === 'year') {
-    const years = filtered.map(r => r.year);
-    const minYr = nanMin(years), maxYr = nanMax(years);
-    const snaps = isCareer
-      ? filtered.map(r => r.total_pr_snaps)
-      : filtered.map(r => r.pass_rush_snaps);
-
-    traces.push({
-      type: 'scatter',
-      mode: 'markers',
-      x: xs,
-      y: ys,
-      hovertemplate: filtered.map((r, i) =>
-        `<b>${r._display}</b><br>${xLabel}: ${formatNum(xs[i], 2)}<br>${yLabel}: ${formatNum(ys[i], 2)}<br>Year: ${r.year}<br>Pos: ${r.position || ''}${isCareer ? `<br>PR Snaps: ${r.total_pr_snaps}` : `<br>Season: ${r.season}`}<extra></extra>`
-      ),
-      showlegend: false,
-      marker: {
-        color: years,
-        colorscale: 'Plasma',
-        cmin: minYr, cmax: maxYr,
-        size: snaps.map(s => Math.max(5, Math.sqrt(isFinite(s) ? s : 0) * 0.5)),
-        opacity: 0.8,
-        colorbar: { title: 'Draft Year', thickness: 12, len: 0.6, tickfont: { color: THEME.muted, size: 10 }, titlefont: { color: THEME.label, size: 11 } },
-        line: { width: 0.5, color: 'rgba(0,0,0,0.3)' },
-      },
-    });
-  } else {
-    // Color by position
-    const posSet = [...new Set(filtered.map(r => r.position || r.pos_group || ''))];
-    const posColorMap = {};
-    const palette = Object.values(POS_COLORS);
-    posSet.forEach((p, i) => { posColorMap[p] = palette[i % palette.length]; });
-
-    const byPos = {};
-    filtered.forEach((r, i) => {
-      const pos = r.position || r.pos_group || '';
-      if (!byPos[pos]) byPos[pos] = { rows: [], xs: [], ys: [] };
-      byPos[pos].rows.push(r);
-      byPos[pos].xs.push(xs[i]);
-      byPos[pos].ys.push(ys[i]);
-    });
-
-    for (const [pos, d] of Object.entries(byPos)) {
-      const snaps = isCareer
-        ? d.rows.map(r => r.total_pr_snaps)
-        : d.rows.map(r => r.pass_rush_snaps);
-      traces.push({
-        type: 'scatter', mode: 'markers',
-        x: d.xs, y: d.ys,
-        name: pos, showlegend: true,
-        hovertemplate: d.rows.map((r, i) =>
-          `<b>${r._display}</b><br>${xLabel}: ${formatNum(d.xs[i], 2)}<br>${yLabel}: ${formatNum(d.ys[i], 2)}<br>Pos: ${pos}<extra></extra>`
-        ),
-        marker: {
-          color: posColorMap[pos],
-          size: snaps.map(s => Math.max(5, Math.sqrt(isFinite(s) ? s : 0) * 0.5)),
-          opacity: 0.8,
-          line: { width: 0.5, color: 'rgba(0,0,0,0.3)' },
-        },
-      });
-    }
-  }
-
-  // OLS regression line + 95% CI band
-  if (reg) {
-    const xMin = nanMin(xs), xMax = nanMax(xs);
-    const nPts = 50;
-    const regXs = Array.from({ length: nPts }, (_, i) => xMin + (i / (nPts - 1)) * (xMax - xMin));
-    const regYs = regXs.map(x => reg.slope * x + reg.intercept);
-
-    // SE for prediction interval
-    const n  = filtered.length;
-    const xm = nanMean(xs);
-    const sxx = xs.reduce((s, x) => s + (x - xm) ** 2, 0);
-    const se = reg.stderr * Math.sqrt(sxx);
-
-    const ciUpper = regXs.map((x, i) => regYs[i] + 1.96 * reg.stderr * Math.sqrt(1 / n + (x - xm) ** 2 / (sxx + 1e-20)));
-    const ciLower = regXs.map((x, i) => regYs[i] - 1.96 * reg.stderr * Math.sqrt(1 / n + (x - xm) ** 2 / (sxx + 1e-20)));
-
-    // CI band
-    traces.push({
-      type: 'scatter', mode: 'lines',
-      x: [...regXs, ...regXs.slice().reverse()],
-      y: [...ciUpper, ...ciLower.slice().reverse()],
-      fill: 'toself',
-      fillcolor: 'rgba(88,166,255,0.10)',
-      line: { width: 0 },
-      showlegend: false, hoverinfo: 'skip', name: '95% CI',
-    });
-
-    // Regression line
-    traces.push({
-      type: 'scatter', mode: 'lines',
-      x: regXs, y: regYs,
-      name: `OLS (r=${reg.r.toFixed(2)})`,
-      line: { color: THEME.accent, width: 2 },
-      hoverinfo: 'skip',
-    });
-
-    // Median crosshairs
-    const xMed = nanMedian(xs), yMed = nanMedian(ys);
-    traces.push({
-      type: 'scatter', mode: 'lines',
-      x: [xMed, xMed], y: [nanMin(ys) * 0.9, nanMax(ys) * 1.1],
-      line: { color: THEME.muted, width: 1, dash: 'dash' },
-      showlegend: false, hoverinfo: 'skip', name: 'X median',
-    });
-    traces.push({
-      type: 'scatter', mode: 'lines',
-      x: [nanMin(xs) * 0.99, nanMax(xs) * 1.01], y: [yMed, yMed],
-      line: { color: THEME.muted, width: 1, dash: 'dash' },
-      showlegend: false, hoverinfo: 'skip', name: 'Y median',
-    });
-
-    // 4-quadrant annotations
-    const q1Label = '✅ High-High';  // x >= med, y >= med
-    const q2Label = '⚠️ Low-High';   // x < med, y >= med
-    const q3Label = '❌ Low-Low';    // x < med, y < med
-    const q4Label = 'ℹ️ High-Low';   // x >= med, y < med
-
-    const xRange = [nanMin(xs), nanMax(xs)];
-    const yRange = [nanMin(ys), nanMax(ys)];
-    const quadAnns = [
-      { x: (xMed + xRange[1]) / 2, y: (yMed + yRange[1]) / 2, text: q1Label },
-      { x: (xRange[0] + xMed) / 2, y: (yMed + yRange[1]) / 2, text: q2Label },
-      { x: (xRange[0] + xMed) / 2, y: (yRange[0] + yMed) / 2, text: q3Label },
-      { x: (xMed + xRange[1]) / 2, y: (yRange[0] + yMed) / 2, text: q4Label },
-    ];
-
-    const layout = makePlotLayout({
-      xaxis: {
-        title: xLabel,
-        gridcolor: THEME.grid, linecolor: THEME.border, zerolinecolor: THEME.border,
-        tickfont: { color: THEME.muted, size: 11 }, title_font: { color: THEME.label },
-      },
-      yaxis: {
-        title: yLabel,
-        gridcolor: THEME.grid, linecolor: THEME.border, zerolinecolor: THEME.border,
-        tickfont: { color: THEME.muted, size: 11 }, title_font: { color: THEME.label },
-      },
-      annotations: quadAnns.map(a => ({
-        x: a.x, y: a.y, text: a.text, showarrow: false,
-        font: { color: THEME.muted, size: 11 }, xref: 'x', yref: 'y',
-        bgcolor: 'rgba(13,17,23,0.5)',
-      })),
-    });
-
-    Plotly.react('pro-plot', traces, layout, { responsive: true, displayModeBar: false });
-  } else {
-    const layout = makePlotLayout({
-      xaxis: { title: xLabel, gridcolor: THEME.grid, linecolor: THEME.border, tickfont: { color: THEME.muted, size: 11 }, title_font: { color: THEME.label } },
-      yaxis: { title: yLabel, gridcolor: THEME.grid, linecolor: THEME.border, tickfont: { color: THEME.muted, size: 11 }, title_font: { color: THEME.label } },
-    });
-    Plotly.react('pro-plot', traces, layout, { responsive: true, displayModeBar: false });
-  }
-
-  // Threshold analysis
-  renderThresholdAnalysis(filtered, xs, ys, xLabel, yLabel, yLower);
-
-  // Data table
-  renderProDataTable(filtered, xLabel, yLabel, xs, ys);
-}
-
-function renderThresholdAnalysis(filtered, xs, ys, xLabel, yLabel, yLower) {
-  const slider = el('thresh-slider');
-  if (!slider) return;
-
-  const validPairs = [];
-  for (let i = 0; i < filtered.length; i++) {
-    if (isFinite(xs[i]) && isFinite(ys[i])) validPairs.push({ x: xs[i], y: ys[i], row: filtered[i] });
-  }
-  if (validPairs.length < 5) return;
-
-  const xMin = nanMin(validPairs.map(p => p.x));
-  const xMax = nanMax(validPairs.map(p => p.x));
-  const xMed = nanMedian(validPairs.map(p => p.x));
-  const yMed = nanMedian(validPairs.map(p => p.y));
-
-  // Set slider range
-  slider.min  = xMin.toFixed(4);
-  slider.max  = xMax.toFixed(4);
-  slider.step = ((xMax - xMin) / 100).toFixed(4);
-  if (STATE.proThreshold === null || STATE.proThreshold < xMin || STATE.proThreshold > xMax) {
-    STATE.proThreshold = xMed;
-    slider.value = xMed;
-  }
-  el('thresh-val').textContent = formatNum(STATE.proThreshold, 2);
-
-  const thresh = STATE.proThreshold;
-  const above  = validPairs.filter(p => p.x >= thresh);
-  const below  = validPairs.filter(p => p.x < thresh);
-
-  function successRate(pairs) {
-    if (pairs.length === 0) return { rate: NaN, n: 0, mean: NaN, median: NaN };
-    const yVals = pairs.map(p => p.y);
-    const successes = yLower
-      ? pairs.filter(p => p.y <= yMed).length
-      : pairs.filter(p => p.y >= yMed).length;
-    return {
-      rate:   (successes / pairs.length) * 100,
-      n:      pairs.length,
-      mean:   nanMean(yVals),
-      median: nanMedian(yVals),
-    };
-  }
-
-  const sa = successRate(above);
-  const sb = successRate(below);
-
-  const aboveBox = el('thresh-above');
-  const belowBox = el('thresh-below');
-
-  aboveBox.innerHTML = `
-    <div style="font-weight:600;margin-bottom:4px">${t('pro_above')} (≥${formatNum(thresh,2)})</div>
-    <div style="font-size:1.4rem;font-weight:700;color:${THEME.accent}">${isFinite(sa.rate) ? sa.rate.toFixed(1) + '%' : '—'}</div>
-    <div style="font-size:0.8rem;color:${THEME.muted}">${t('pro_success')}</div>
-    <div style="margin-top:6px;font-size:0.85rem">
-      <span>${t('pro_players')}: <b>${sa.n}</b></span><br>
-      <span>${t('pro_avg')}: <b>${formatNum(sa.mean,2)}</b></span><br>
-      <span>${t('pro_med')}: <b>${formatNum(sa.median,2)}</b></span>
-    </div>
-  `;
-  belowBox.innerHTML = `
-    <div style="font-weight:600;margin-bottom:4px">${t('pro_below')} (<${formatNum(thresh,2)})</div>
-    <div style="font-size:1.4rem;font-weight:700;color:${THEME.muted}">${isFinite(sb.rate) ? sb.rate.toFixed(1) + '%' : '—'}</div>
-    <div style="font-size:0.8rem;color:${THEME.muted}">${t('pro_success')}</div>
-    <div style="margin-top:6px;font-size:0.85rem">
-      <span>${t('pro_players')}: <b>${sb.n}</b></span><br>
-      <span>${t('pro_avg')}: <b>${formatNum(sb.mean,2)}</b></span><br>
-      <span>${t('pro_med')}: <b>${formatNum(sb.median,2)}</b></span>
-    </div>
-  `;
-
-  // Conclusion text
-  const concl = el('thresh-conclusion');
-  if (isFinite(sa.rate) && isFinite(sb.rate)) {
-    const diff = sa.rate - sb.rate;
-    if (Math.abs(diff) < 5) {
-      concl.textContent = `Little difference: success rates within 5% of each other.`;
-    } else if (diff > 0) {
-      concl.textContent = `Players ≥ ${formatNum(thresh,2)} show ${diff.toFixed(1)}% higher success rate in ${yLabel}.`;
-    } else {
-      concl.textContent = `Players < ${formatNum(thresh,2)} show ${(-diff).toFixed(1)}% higher success rate — the metric may not predict ${yLabel} in the expected direction.`;
-    }
-  }
-
-  // Bar chart
-  const barTraces = [{
-    type: 'bar',
-    x: [t('pro_above'), t('pro_below')],
-    y: [sa.rate, sb.rate],
-    marker: { color: [THEME.accent, THEME.muted] },
-    text: [sa.rate.toFixed(1) + '%', sb.rate.toFixed(1) + '%'],
-    textposition: 'outside',
-    textfont: { color: THEME.text },
-    hovertemplate: '%{x}<br>Success: %{y:.1f}%<extra></extra>',
-  }];
-  const barLayout = makePlotLayout({
-    yaxis: { title: 'Success Rate (%)', range: [0, 105], gridcolor: THEME.grid, linecolor: THEME.border, tickfont: { color: THEME.muted }, title_font: { color: THEME.label } },
-    xaxis: { gridcolor: THEME.grid, linecolor: THEME.border, tickfont: { color: THEME.muted } },
-    margin: { t: 20, b: 40, l: 60, r: 20 },
-    showlegend: false,
-  });
-  Plotly.react('thresh-bar-plot', barTraces, barLayout, { responsive: true, displayModeBar: false });
-}
-
-function renderProDataTable(filtered, xLabel, yLabel, xs, ys) {
-  const expander = el('pro-table-expander');
-  if (!expander || !expander.open) return;
-
-  const thead = el('pro-thead');
-  const tbody = el('pro-tbody');
-  thead.innerHTML = '';
-  tbody.innerHTML = '';
-
-  const isCareer = STATE.proAggMode === 'career';
-  const htr = document.createElement('tr');
-  htr.innerHTML = '<th>Player</th><th>Year</th><th>Pos</th>' +
-    `<th>${xLabel}</th><th>${yLabel}</th>` +
-    (isCareer ? '<th>PR Snaps</th><th>Seasons</th>' : '<th>Season</th><th>Snaps</th>');
-  thead.appendChild(htr);
-
-  for (let i = 0; i < filtered.length; i++) {
-    const row = filtered[i];
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${row._display}</td><td>${row.year}</td><td>${row.position || row.pos_group}</td>` +
-      `<td>${formatNum(xs[i], 2)}</td><td>${formatNum(ys[i], 2)}</td>` +
-      (isCareer
-        ? `<td>${row.total_pr_snaps}</td><td>${row.pro_seasons}</td>`
-        : `<td>${row.season}</td><td>${row.pass_rush_snaps}</td>`);
-    tbody.appendChild(tr);
-  }
-}
-
-function renderProHeatmap() {
-  const filtered  = getHmFilteredData();
-  const ppmMap    = STATE.proAggMode === 'career' ? PPM : PPM_SEASON;
-  const zLabel    = STATE.hmZLabel;
-  const zCols     = ppmMap[zLabel];
-  const zCol      = zCols ? zCols[0] : null;
-  const zLower    = zCols ? zCols[1] : false;
-
-  if (filtered.length < 5) {
-    Plotly.react('pro-plot', [{
-      type: 'scatter', mode: 'text',
-      x: [0.5], y: [0.5], text: [t('pro_no_data').replace('{n}', filtered.length)],
-      textfont: { color: THEME.muted, size: 14 },
-    }], makePlotLayout(), { responsive: true, displayModeBar: false });
-    ['hm-n-val','hm-cells-val','hm-meanz-val','hm-medianz-val'].forEach(id => el(id).textContent = '—');
-    return;
-  }
-
-  const xs = filtered.map(r => resolveMeasurement(r, STATE.hmXLabel, STATE.hmUseProDay));
-  const ys = filtered.map(r => resolveMeasurement(r, STATE.hmYLabel, STATE.hmUseProDay));
-  const zs = zCol ? filtered.map(r => r[zCol]) : [];
-
-  const result = binnedStatistic2D(xs, ys, zs, STATE.hmNBins, STATE.hmAggFunc);
-  if (!result) return;
-
-  const { zValues, xEdges, yEdges, counts } = result;
-
-  // Flatten for heatmap: transpose to [y][x]
-  const nBins = STATE.hmNBins;
-  const heatZ = Array.from({ length: nBins }, (_, j) =>
-    Array.from({ length: nBins }, (_, i) => zValues[i][j])
-  );
-  const xCenters = Array.from({ length: nBins }, (_, i) => (xEdges[i] + xEdges[i + 1]) / 2);
-  const yCenters = Array.from({ length: nBins }, (_, j) => (yEdges[j] + yEdges[j + 1]) / 2);
-
-  const allZ = heatZ.flat().filter(isFinite);
-  el('hm-n-val').textContent      = filtered.length;
-  el('hm-cells-val').textContent  = allZ.length;
-  el('hm-meanz-val').textContent  = formatNum(nanMean(allZ), 3);
-  el('hm-medianz-val').textContent= formatNum(nanMedian(allZ), 3);
-
-  const traces = [];
-
-  traces.push({
-    type: 'heatmap',
-    x: xCenters,
-    y: yCenters,
-    z: heatZ,
-    colorscale: zLower ? 'RdYlGn_r' : 'RdYlGn',
-    colorbar: {
-      title: zLabel, thickness: 12, len: 0.7,
-      titlefont: { color: THEME.label, size: 11 },
-      tickfont: { color: THEME.muted, size: 10 },
-    },
-    zsmooth: false,
-    hovertemplate: `${STATE.hmXLabel}: %{x:.2f}<br>${STATE.hmYLabel}: %{y:.2f}<br>${zLabel}: %{z:.3f}<extra></extra>`,
-  });
-
-  // Median crosshairs
-  const xMed = nanMedian(xs), yMed = nanMedian(ys);
-  traces.push({
-    type: 'scatter', mode: 'lines',
-    x: [xMed, xMed], y: [nanMin(ys), nanMax(ys)],
-    line: { color: THEME.muted, width: 1.5, dash: 'dash' },
-    showlegend: false, hoverinfo: 'skip',
-  });
-  traces.push({
-    type: 'scatter', mode: 'lines',
-    x: [nanMin(xs), nanMax(xs)], y: [yMed, yMed],
-    line: { color: THEME.muted, width: 1.5, dash: 'dash' },
-    showlegend: false, hoverinfo: 'skip',
-  });
-
-  // Scatter overlay
-  if (STATE.hmShowScatter) {
-    const snaps = filtered.map(r => r.total_pr_snaps || 0);
-    traces.push({
-      type: 'scatter', mode: 'markers',
-      x: xs, y: ys,
-      name: 'Players',
-      marker: {
-        color: 'rgba(255,255,255,0.5)',
-        size: snaps.map(s => Math.max(4, Math.sqrt(isFinite(s) ? s : 0) * 0.4)),
-        line: { width: 0.5, color: 'rgba(0,0,0,0.3)' },
-      },
-      hovertemplate: filtered.map((r, i) =>
-        `<b>${r._display}</b><br>${STATE.hmXLabel}: ${formatNum(xs[i],2)}<br>${STATE.hmYLabel}: ${formatNum(ys[i],2)}<br>${zLabel}: ${zCol ? formatNum(r[zCol],2) : '—'}<extra></extra>`
-      ),
-    });
-  }
-
-  const layout = makePlotLayout({
-    xaxis: {
-      title: STATE.hmXLabel,
-      gridcolor: THEME.grid, linecolor: THEME.border,
-      tickfont: { color: THEME.muted, size: 11 }, title_font: { color: THEME.label },
-    },
-    yaxis: {
-      title: STATE.hmYLabel,
-      gridcolor: THEME.grid, linecolor: THEME.border,
-      tickfont: { color: THEME.muted, size: 11 }, title_font: { color: THEME.label },
-    },
-  });
-
-  Plotly.react('pro-plot', traces, layout, { responsive: true, displayModeBar: false });
-}
 
 // ─── Active Tab Renderer ───────────────────────────────────────────────────────
 function renderActiveTab() {
@@ -1626,7 +977,6 @@ function renderActiveTab() {
     case 'scatter':   renderScatter();   break;
     case 'histogram': renderHistogram(); break;
     case 'compare':   renderCompare();   break;
-    case 'pro':       renderPro();       break;
   }
 }
 
@@ -1840,7 +1190,6 @@ function wireUI() {
   populateSelect('y-label-select', MEAS_LABELS, STATE.yLabel);
   el('x-label-select').addEventListener('change', () => {
     STATE.xLabel = el('x-label-select').value;
-    STATE.proThreshold = null;
     renderActiveTab();
   });
   el('y-label-select').addEventListener('change', () => {
@@ -1962,21 +1311,10 @@ function wireUI() {
     if (el('boxplot-expander').open) renderBoxPlot(getFilteredData().dfBase);
   });
 
-  // Pro table expander
-  el('pro-table-expander').addEventListener('toggle', () => {
-    if (el('pro-table-expander').open && STATE.activeTab === 'pro') renderPro();
-  });
-
   // Download CSV (scatter)
   el('scatter-download-csv').addEventListener('click', () => {
     const { dfBase } = getFilteredData();
     downloadCSV(dfBase, 'nfl_combine_filtered.csv');
-  });
-
-  // Download CSV (pro table)
-  el('pro-table-download').addEventListener('click', () => {
-    const filtered = getProFilteredData();
-    downloadCSV(filtered, 'nfl_pro_filtered.csv');
   });
 
   // Compare: player search
@@ -2012,151 +1350,6 @@ function wireUI() {
     renderCompare();
   });
 
-  // ── Pro controls wiring ────────────────────────────────────────────────────
-
-  // View mode buttons
-  el('pro-view-scatter').addEventListener('click', () => {
-    STATE.proViewMode = 'scatter';
-    el('pro-view-scatter').classList.add('active');
-    el('pro-view-heatmap').classList.remove('active');
-    renderPro();
-  });
-  el('pro-view-heatmap').addEventListener('click', () => {
-    STATE.proViewMode = 'heatmap';
-    el('pro-view-heatmap').classList.add('active');
-    el('pro-view-scatter').classList.remove('active');
-    renderPro();
-  });
-
-  // Aggregation mode buttons
-  el('pro-agg-career').addEventListener('click', () => {
-    STATE.proAggMode = 'career';
-    el('pro-agg-career').classList.add('active');
-    el('pro-agg-season').classList.remove('active');
-    // Update Y selects
-    populateSelect('pro-y-select', Object.keys(PPM), STATE.proYLabel);
-    populateSelect('hm-z-select', Object.keys(PPM), STATE.hmZLabel);
-    renderPro();
-  });
-  el('pro-agg-season').addEventListener('click', () => {
-    STATE.proAggMode = 'season';
-    el('pro-agg-season').classList.add('active');
-    el('pro-agg-career').classList.remove('active');
-    // Update Y selects for season
-    const firstSeasonKey = Object.keys(PPM_SEASON)[0];
-    if (!PPM_SEASON[STATE.proYLabel]) STATE.proYLabel = firstSeasonKey;
-    if (!PPM_SEASON[STATE.hmZLabel])  STATE.hmZLabel  = firstSeasonKey;
-    populateSelect('pro-y-select', Object.keys(PPM_SEASON), STATE.proYLabel);
-    populateSelect('hm-z-select', Object.keys(PPM_SEASON), STATE.hmZLabel);
-    renderPro();
-  });
-
-  // Pro scatter X/Y selects
-  populateSelect('pro-x-select', Object.keys(ECM), STATE.proXLabel);
-  populateSelect('pro-y-select', Object.keys(PPM), STATE.proYLabel);
-  el('pro-x-select').addEventListener('change', () => {
-    STATE.proXLabel = el('pro-x-select').value;
-    STATE.proThreshold = null;
-    renderPro();
-  });
-  el('pro-y-select').addEventListener('change', () => {
-    STATE.proYLabel = el('pro-y-select').value;
-    renderPro();
-  });
-
-  // Pro use proday
-  el('pro-use-pd').addEventListener('change', () => {
-    STATE.proUseProDay = el('pro-use-pd').checked;
-    renderPro();
-  });
-
-  // Pro min snaps
-  el('pro-min-snaps').addEventListener('input', () => {
-    STATE.proMinSnaps = parseInt(el('pro-min-snaps').value) || 0;
-    el('pro-snaps-val').textContent = STATE.proMinSnaps;
-    renderPro();
-  });
-
-  // Pro position multiselect
-  buildMultiselect({
-    wrapId: 'pro-pos-ms-wrap', inputId: 'pro-pos-input',
-    tagsId: 'pro-pos-tags', dropdownId: 'pro-pos-dropdown',
-    options: ['DE', 'OLB', 'EDGE', 'EDG'],
-    selected: STATE.proPosFilter,
-    colorFn: null,
-    onChange: sel => { STATE.proPosFilter = sel; renderPro(); },
-  });
-
-  // Pro year range
-  el('pro-year-start').addEventListener('change', () => {
-    STATE.proYearStart = parseInt(el('pro-year-start').value) || 2008;
-    renderPro();
-  });
-  el('pro-year-end').addEventListener('change', () => {
-    STATE.proYearEnd = parseInt(el('pro-year-end').value) || 2022;
-    renderPro();
-  });
-
-  // Pro color by
-  document.querySelectorAll('input[name="pro-color-by"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-      if (radio.checked) { STATE.proColorBy = radio.value; renderPro(); }
-    });
-  });
-
-  // Threshold slider
-  el('thresh-slider').addEventListener('input', () => {
-    STATE.proThreshold = parseFloat(el('thresh-slider').value);
-    el('thresh-val').textContent = formatNum(STATE.proThreshold, 2);
-    const filtered = getProFilteredData();
-    const xLabel = STATE.proXLabel;
-    const yLabel = STATE.proYLabel;
-    const ppmMap = STATE.proAggMode === 'career' ? PPM : PPM_SEASON;
-    const yCols  = ppmMap[yLabel];
-    const yCol   = yCols ? yCols[0] : null;
-    const yLower = yCols ? yCols[1] : false;
-    const xs = filtered.map(r => resolveMeasurement(r, xLabel, STATE.proUseProDay));
-    const ys = yCol ? filtered.map(r => r[yCol]) : [];
-    renderThresholdAnalysis(filtered, xs, ys, xLabel, yLabel, yLower);
-  });
-
-  // Heatmap controls
-  populateSelect('hm-x-select', Object.keys(ECM), STATE.hmXLabel);
-  populateSelect('hm-y-select', Object.keys(ECM), STATE.hmYLabel);
-  populateSelect('hm-z-select', Object.keys(PPM), STATE.hmZLabel);
-  el('hm-x-select').addEventListener('change', () => { STATE.hmXLabel = el('hm-x-select').value; renderPro(); });
-  el('hm-y-select').addEventListener('change', () => { STATE.hmYLabel = el('hm-y-select').value; renderPro(); });
-  el('hm-z-select').addEventListener('change', () => { STATE.hmZLabel = el('hm-z-select').value; renderPro(); });
-  el('hm-use-pd').addEventListener('change', () => { STATE.hmUseProDay = el('hm-use-pd').checked; renderPro(); });
-  el('hm-min-snaps').addEventListener('input', () => {
-    STATE.hmMinSnaps = parseInt(el('hm-min-snaps').value) || 0;
-    el('hm-snaps-val').textContent = STATE.hmMinSnaps;
-    renderPro();
-  });
-  buildMultiselect({
-    wrapId: 'hm-pos-ms-wrap', inputId: 'hm-pos-input',
-    tagsId: 'hm-pos-tags', dropdownId: 'hm-pos-dropdown',
-    options: ['DE', 'OLB', 'EDGE', 'EDG'],
-    selected: STATE.hmPosFilter,
-    colorFn: null,
-    onChange: sel => { STATE.hmPosFilter = sel; renderPro(); },
-  });
-  el('hm-year-start').addEventListener('change', () => { STATE.hmYearStart = parseInt(el('hm-year-start').value) || 2008; renderPro(); });
-  el('hm-year-end').addEventListener('change', () => { STATE.hmYearEnd = parseInt(el('hm-year-end').value) || 2022; renderPro(); });
-  el('hm-bins').addEventListener('input', () => {
-    STATE.hmNBins = parseInt(el('hm-bins').value) || 12;
-    el('hm-bins-val').textContent = STATE.hmNBins;
-    renderPro();
-  });
-  document.querySelectorAll('input[name="hm-agg"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-      if (radio.checked) { STATE.hmAggFunc = radio.value; renderPro(); }
-    });
-  });
-  el('hm-show-scatter').addEventListener('change', () => {
-    STATE.hmShowScatter = el('hm-show-scatter').checked;
-    renderPro();
-  });
 
   // Mobile sidebar
   const sidebarToggleBtn = el('sidebar-toggle-btn');
@@ -2175,7 +1368,7 @@ function wireUI() {
 
   // Window resize
   window.addEventListener('resize', () => {
-    for (const id of ['scatter-plot', 'histogram-plot', 'radar-plot', 'pro-plot', 'boxplot-plot', 'thresh-bar-plot']) {
+    for (const id of ['scatter-plot', 'histogram-plot', 'radar-plot', 'boxplot-plot']) {
       const node = el(id);
       if (node && node._fullLayout) Plotly.Plots.resize(node);
     }
@@ -2229,20 +1422,6 @@ async function loadData() {
     // Compute percentiles for compare tab
     loadText.textContent = 'Computing percentiles…';
     computeAllPosPercentiles();
-
-    // Load pass rush data
-    loadText.textContent = 'Loading Pro Stats…';
-    try {
-      const prData = await loadCSV('Pro_Stats/nflpro_passrush_all.csv');
-      for (const row of prData) {
-        PASSRUSH_RAW.push(preprocessPassrushRow(row));
-      }
-      loadText.textContent = 'Building merged dataset…';
-      buildMergedEdgeData();
-      buildMergedEdgeSeasonData();
-    } catch (e) {
-      console.warn('Pass Rush data not found:', e);
-    }
 
     // Hide loading overlay
     overlay.style.opacity = '0';
