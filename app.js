@@ -15,7 +15,7 @@ let POS_PERCENTILES = {}; // { pos_group: { label: [sorted drafted values] } }
 const STATE = {
   lang:              'EN',
   yearStart:         2006,
-  yearEnd:           2025,
+  yearEnd:           2026,
   selectedPos:       [...POS_GROUP_ORDER],
   xLabel:            '40-Yard Dash (s)',
   yLabel:            'Vertical Jump (in)',
@@ -1167,7 +1167,7 @@ function wireUI() {
     renderActiveTab();
   });
   el('year-end').addEventListener('change', () => {
-    STATE.yearEnd = Math.max(parseInt(el('year-end').value) || 2025, STATE.yearStart);
+    STATE.yearEnd = Math.max(parseInt(el('year-end').value) || 2026, STATE.yearStart);
     el('year-caption').textContent = `${STATE.yearStart}–${STATE.yearEnd} (${STATE.yearEnd - STATE.yearStart + 1} years)`;
     renderActiveTab();
   });
